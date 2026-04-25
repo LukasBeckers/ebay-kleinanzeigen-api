@@ -9,8 +9,9 @@ import asyncio
 import time
 import random
 import gc
-from urllib.parse import urlencode
 from typing import List, Dict, Any, Tuple
+
+from scrapers.url_builder import build_search_url_template
 
 from fastapi import HTTPException
 
@@ -66,9 +67,13 @@ class UltraOptimizedScraper:
         to minimize memory usage.
         """
         try:
-            # Use more specific selector to reduce DOM traversal
+            # Scope to the main search-results list (#srchrslt-adtable) so we
+            # never pick up "Auch interessant" / related-items panels that
+            # appear on sparse search result pages.  Without this scoping,
+            # queries that match few items can get polluted with algorithmic
+            # suggestions from unrelated categories.
             items = await page.query_selector_all(
-                ".ad-listitem:not(.is-topad):not(.badge-hint-pro-small-srp) article[data-adid]"
+                "#srchrslt-adtable .ad-listitem:not(.is-topad):not(.badge-hint-pro-small-srp) article[data-adid]"
             )
 
             results = []
@@ -275,6 +280,7 @@ class UltraOptimizedScraper:
         min_price: int = None,
         max_price: int = None,
         page_count: int = 1,
+        category: str = None,
     ) -> Dict[str, Any]:
         """
         Ultra-optimized multi-page scraping with all performance enhancements.
@@ -290,28 +296,17 @@ class UltraOptimizedScraper:
         tracker.start_request()
 
         with error_handling_context(operation="ultra_multi_page_scrape", logger=logger) as ctx:
-            # Build URLs efficiently
-            base_url = "https://www.kleinanzeigen.de"
-
-            # Optimized URL building
-            price_path = ""
-            if min_price is not None or max_price is not None:
-                min_str = str(min_price) if min_price is not None else ""
-                max_str = str(max_price) if max_price is not None else ""
-                price_path = f"/preis:{min_str}:{max_str}"
-
-            search_path = f"{price_path}/s-seite:{{page}}"
-
-            params = {}
-            if query:
-                params["keywords"] = query
-            if location:
-                params["locationStr"] = location
-            if radius:
-                params["radius"] = radius
-
-            param_string = f"?{urlencode(params)}" if params else ""
-            search_url = base_url + search_path.format(price_path=price_path, page='{page}') + param_string
+            # URL template has a literal ``{page}`` placeholder that each page
+            # task formats with its own page number.  See scrapers/url_builder.py
+            # for the format rationale — in particular, the category bug fix.
+            search_url = build_search_url_template(
+                query=query,
+                location=location,
+                radius=radius,
+                min_price=min_price,
+                max_price=max_price,
+                category=category,
+            )
 
             # Create page fetch tasks
             async def create_page_task(page_num: int):
@@ -460,6 +455,7 @@ async def ultra_optimized_scrape_inserate(
     min_price: int = None,
     max_price: int = None,
     page_count: int = 1,
+    category: str = None,
 ) -> Dict[str, Any]:
     """
     Direct function for ultra-optimized scraping.
@@ -481,6 +477,7 @@ async def ultra_optimized_scrape_inserate(
             min_price=min_price,
             max_price=max_price,
             page_count=page_count,
+            category=category,
         )
     finally:
         await scraper.cleanup()
