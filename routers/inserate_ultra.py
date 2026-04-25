@@ -18,6 +18,11 @@ async def get_inserate_ultra_optimized(
     max_price: int = Query(None, description="Maximum price filter"),
     page_count: int = Query(1, ge=1, le=20, description="Number of pages to fetch"),
     category: str = Query(None, description="Kleinanzeigen category id (e.g. '305' for motorcycles)"),
+    sort: str = Query(
+        None,
+        description="Server-side sort: newest | price_asc | price_desc | distance_asc",
+        pattern="^(newest|price_asc|price_desc|distance_asc)$",
+    ),
 ):
     """
     Fetch listings based on search criteria.
@@ -41,6 +46,7 @@ async def get_inserate_ultra_optimized(
             max_price=max_price,
             page_count=page_count,
             category=category,
+            sort=sort,
         )
 
         # Clean up response - remove excessive metrics for production

@@ -108,3 +108,70 @@ class TestPagination:
         assert tpl.format(page=7) == (
             "https://www.kleinanzeigen.de/s-/seite:7/c305?locationStr=52538&radius=100"
         )
+
+
+class TestSort:
+    """Server-side sort options exposed as ``/sortierung:<token>`` path slug."""
+
+    def test_default_emits_no_segment(self):
+        url = build_search_url(page=1, query="mofa")
+        assert "/sortierung:" not in url
+
+    def test_explicit_newest_emits_no_segment(self):
+        # ``newest`` is the kleinanzeigen default, so it omits the slug
+        # — explicit "newest" must produce a URL byte-identical to the
+        # no-sort URL (otherwise we'd be surfacing a redirect-prone form).
+        no_sort = build_search_url(page=1, query="mofa")
+        explicit = build_search_url(page=1, query="mofa", sort="newest")
+        assert no_sort == explicit
+
+    def test_price_asc_appends_sortingField_param(self):
+        url = build_search_url(page=1, query="mofa", min_price=0, max_price=300, sort="price_asc")
+        # Sort travels as a query parameter (path-slug form is silently ignored).
+        assert "sortingField=PRICE_AMOUNT" in url
+        # And the path itself remains the standard newest-first shape.
+        assert "/preis:0:300/s-seite:1" in url
+
+    def test_price_desc_with_category(self):
+        url = build_search_url(page=2, category="305", location="52538", radius=100, sort="price_desc")
+        assert url == (
+            "https://www.kleinanzeigen.de/s-/seite:2/c305"
+            "?locationStr=52538&radius=100&sortingField=PRICE_AMOUNT_DESC"
+        )
+
+    def test_distance_asc(self):
+        url = build_search_url(page=1, location="52538", radius=100, sort="distance_asc")
+        assert "sortingField=DISTANCE" in url
+
+    def test_unknown_value_raises(self):
+        import pytest as _pt
+        with _pt.raises(ValueError):
+            build_search_url(page=1, query="x", sort="random")
+
+
+class TestDefaultSnapshot:
+    """Backwards-compat: existing callers (proxy, hunter) pass no ``sort`` arg.
+
+    Their URLs MUST stay byte-identical to before this parameter existed.
+    """
+
+    SNAPSHOTS = [
+        # (kwargs, expected URL for page 1)
+        (dict(query="mofa"), "https://www.kleinanzeigen.de/s-seite:1?keywords=mofa"),
+        (
+            dict(query="mofa", location="52538", radius=100),
+            "https://www.kleinanzeigen.de/s-seite:1?keywords=mofa&locationStr=52538&radius=100",
+        ),
+        (
+            dict(category="305", location="52538", radius=75, min_price=30, max_price=200),
+            "https://www.kleinanzeigen.de/s-/preis:30:200/seite:1/c305?locationStr=52538&radius=75",
+        ),
+    ]
+
+    def test_no_sort_kwarg_byte_identical(self):
+        for kwargs, expected in self.SNAPSHOTS:
+            assert build_search_url(page=1, **kwargs) == expected
+
+    def test_sort_none_byte_identical(self):
+        for kwargs, expected in self.SNAPSHOTS:
+            assert build_search_url(page=1, sort=None, **kwargs) == expected

@@ -8,10 +8,16 @@ data-adid attributes.
 
 This is enough to ``catch`` future layout changes on Kleinanzeigen and
 forces the real scraper to keep scoping its selector correctly.
+
+Also covers the pure-Python ``parse_listing_date`` helper (no fixture).
 """
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
+
+from scrapers.dates import parse_listing_date
 
 
 def _parse(html: str) -> BeautifulSoup:
@@ -111,3 +117,54 @@ class TestRelevance:
             f"only {hits}/{len(titles)} ({ratio:.0%}) titles look motorcycle-domain: "
             f"{titles[:5]}"
         )
+
+
+class TestParseListingDate:
+    """Card-level posted_at parsing.  ``now`` is pinned for determinism."""
+
+    BERLIN = ZoneInfo("Europe/Berlin")
+    # 2026-04-25 Saturday 12:00 Berlin → 10:00 UTC
+    NOW = datetime(2026, 4, 25, 12, 0, 0, tzinfo=BERLIN)
+
+    def test_today(self):
+        out = parse_listing_date("Heute, 10:06", now=self.NOW)
+        # 10:06 Europe/Berlin on the same calendar day as ``now`` → 08:06 UTC
+        assert out == "2026-04-25T08:06:00+00:00"
+
+    def test_today_short_hour(self):
+        out = parse_listing_date("Heute, 8:30", now=self.NOW)
+        assert out == "2026-04-25T06:30:00+00:00"
+
+    def test_yesterday(self):
+        out = parse_listing_date("Gestern, 14:18", now=self.NOW)
+        assert out == "2026-04-24T12:18:00+00:00"
+
+    def test_explicit_date(self):
+        out = parse_listing_date("23.04.2026", now=self.NOW)
+        # Midnight Europe/Berlin → 22:00 UTC the previous day
+        assert out == "2026-04-22T22:00:00+00:00"
+
+    def test_with_leading_whitespace(self):
+        out = parse_listing_date(" Heute, 10:06", now=self.NOW)
+        assert out == "2026-04-25T08:06:00+00:00"
+
+    def test_empty(self):
+        assert parse_listing_date("", now=self.NOW) is None
+        assert parse_listing_date(None, now=self.NOW) is None
+
+    def test_garbage(self):
+        assert parse_listing_date("ASAP", now=self.NOW) is None
+        assert parse_listing_date("Vor 10 Min.", now=self.NOW) is None
+
+    def test_invalid_date(self):
+        # 31.02 isn't a real date → returns None instead of crashing
+        assert parse_listing_date("31.02.2026", now=self.NOW) is None
+
+    def test_today_is_dst_aware(self):
+        """At Europe/Berlin DST transitions the UTC offset changes from +01 to +02.
+        Pin ``now`` to a summer date and confirm the offset is applied."""
+        # 1 July 2026 is in CEST (+02:00).
+        now_summer = datetime(2026, 7, 1, 12, 0, 0, tzinfo=self.BERLIN)
+        out = parse_listing_date("Heute, 14:00", now=now_summer)
+        # 14:00 CEST = 12:00 UTC
+        assert out == "2026-07-01T12:00:00+00:00"

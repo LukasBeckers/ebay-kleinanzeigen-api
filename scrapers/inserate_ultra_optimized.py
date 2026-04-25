@@ -12,6 +12,7 @@ import gc
 from typing import List, Dict, Any, Tuple
 
 from scrapers.url_builder import build_search_url_template
+from scrapers.dates import parse_listing_date
 
 from fastapi import HTTPException
 
@@ -31,6 +32,17 @@ from utils.asyncio_optimizations import (
     EventLoopOptimizer,
     monitor_slow_coroutines,
 )
+
+
+class PageNotReadyError(Exception):
+    """Raised when a search-results page never produced visible organic listings.
+
+    The wait selector either timed out, or the page rendered (e.g. its
+    sponsored cards) but ``#srchrslt-adtable`` was still empty after extraction.
+    The message includes the word "timeout" so ``ErrorClassifier`` routes this
+    as ``NETWORK`` → ``is_recoverable=True`` → eligible for the existing
+    exponential-backoff retry path inside ``ultra_optimized_fetch_page``.
+    """
 
 
 class UltraOptimizedScraper:
@@ -126,9 +138,12 @@ class UltraOptimizedScraper:
             desc_task = self._get_text_content(
                 article, "p.aditem-main--middle--description"
             )
+            # Card-level posted-at — kleinanzeigen renders this as
+            # "Heute, HH:MM" / "Gestern, HH:MM" / "DD.MM.YYYY".
+            date_task = self._get_text_content(article, "div.aditem-main--top--right")
 
-            title_text, price_text, description_text = await asyncio.gather(
-                title_task, price_task, desc_task, return_exceptions=True
+            title_text, price_text, description_text, date_text = await asyncio.gather(
+                title_task, price_task, desc_task, date_task, return_exceptions=True
             )
 
             # Process price text efficiently
@@ -142,6 +157,9 @@ class UltraOptimizedScraper:
             else:
                 price_text = ""
 
+            posted_at_raw = date_text.strip() if isinstance(date_text, str) else ""
+            posted_at = parse_listing_date(posted_at_raw)
+
             return {
                 "adid": data_adid,
                 "url": f"https://www.kleinanzeigen.de{data_href}",
@@ -150,6 +168,8 @@ class UltraOptimizedScraper:
                 "description": description_text
                 if isinstance(description_text, str)
                 else "",
+                "posted_at": posted_at,
+                "posted_at_raw": posted_at_raw,
             }
 
         except Exception:
@@ -198,17 +218,39 @@ class UltraOptimizedScraper:
                     # Optimized page loading with minimal wait
                     await page.goto(url, timeout=60000, wait_until="domcontentloaded")
 
-                    # Wait for essential content only
+                    # Wait for the *organic* result grid to hydrate.  The old
+                    # selector ``.ad-listitem`` matched sponsored cards above
+                    # the fold too, so it'd succeed in <100ms even when
+                    # ``#srchrslt-adtable`` was still empty — and a fast
+                    # extraction against the un-hydrated DOM silently returned
+                    # zero listings.  Scoping to the result grid + raising
+                    # PageNotReadyError lets the existing retry kick in.
                     try:
                         await page.wait_for_selector(
-                            ".ad-listitem", timeout=5000, state="visible"
+                            "#srchrslt-adtable .ad-listitem article[data-adid]",
+                            timeout=15000,
+                            state="attached",
                         )
                     except Exception:
-                        # Continue even if selector not found - might be empty page
-                        pass
+                        raise PageNotReadyError(
+                            f"page {page_num} hydration timeout: {url}"
+                        )
 
                     # Extract ads with optimized method
                     results = await self.extract_ads_optimized(page)
+                    # ErrorLogger wraps a stdlib logger at ``.logger``.
+                    logger.logger.info(
+                        f"page {page_num} extracted {len(results)} listings"
+                    )
+
+                    # Even after hydration, an unexpectedly empty extraction is
+                    # almost always a soft block / mid-render race — treat it
+                    # as a fetch failure so the retry path runs instead of
+                    # marking it ``success=True, results_count=0``.
+                    if not results:
+                        raise PageNotReadyError(
+                            f"page {page_num} extraction yielded 0 listings (timeout-equivalent): {url}"
+                        )
 
                     # Create successful metrics
                     metrics = PageMetrics(
@@ -281,6 +323,7 @@ class UltraOptimizedScraper:
         max_price: int = None,
         page_count: int = 1,
         category: str = None,
+        sort: str = None,
     ) -> Dict[str, Any]:
         """
         Ultra-optimized multi-page scraping with all performance enhancements.
@@ -306,6 +349,7 @@ class UltraOptimizedScraper:
                 min_price=min_price,
                 max_price=max_price,
                 category=category,
+                sort=sort,
             )
 
             # Create page fetch tasks
@@ -456,6 +500,7 @@ async def ultra_optimized_scrape_inserate(
     max_price: int = None,
     page_count: int = 1,
     category: str = None,
+    sort: str = None,
 ) -> Dict[str, Any]:
     """
     Direct function for ultra-optimized scraping.
@@ -478,6 +523,7 @@ async def ultra_optimized_scrape_inserate(
             max_price=max_price,
             page_count=page_count,
             category=category,
+            sort=sort,
         )
     finally:
         await scraper.cleanup()

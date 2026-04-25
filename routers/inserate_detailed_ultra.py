@@ -26,6 +26,11 @@ async def get_inserate_with_details(
         5, ge=1, le=10, description="Maximum concurrent detail fetches"
     ),
     category: str = Query(None, description="Kleinanzeigen category id"),
+    sort: str = Query(
+        None,
+        description="Server-side sort: newest | price_asc | price_desc | distance_asc",
+        pattern="^(newest|price_asc|price_desc|distance_asc)$",
+    ),
 ):
     """
     Fetch listings with detailed information in a single request.
@@ -51,6 +56,7 @@ async def get_inserate_with_details(
             max_price=max_price,
             page_count=page_count,
             category=category,
+            sort=sort,
         )
 
         if not listings_result.get("success", False):
