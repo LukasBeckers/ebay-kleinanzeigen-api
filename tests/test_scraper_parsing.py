@@ -168,3 +168,50 @@ class TestParseListingDate:
         out = parse_listing_date("Heute, 14:00", now=now_summer)
         # 14:00 CEST = 12:00 UTC
         assert out == "2026-07-01T12:00:00+00:00"
+
+
+class TestParseLocation:
+    """Card-level location parsing.  Tested against the actual strings observed
+    on kleinanzeigen.de — the extractor never raises and degrades gracefully
+    when components are missing."""
+
+    def test_typical_with_distance(self):
+        from scrapers.locations import parse_location
+        assert parse_location("52249 Eschweiler (28 km)") == ("52249", "Eschweiler", 28)
+
+    def test_with_ca_distance_boundary(self):
+        from scrapers.locations import parse_location
+        # Distance kleinanzeigen labels "(ca. 100 km)" — same numeric value,
+        # the "ca." just signals it's near the radius edge.
+        assert parse_location("44809 Bochum-Mitte (ca. 100 km)") == ("44809", "Bochum-Mitte", 100)
+
+    def test_4digit_plz(self):
+        from scrapers.locations import parse_location
+        # German 4-digit PLZ are valid (e.g. former DDR area, some small towns).
+        assert parse_location("9999 Testdorf (5 km)") == ("9999", "Testdorf", 5)
+
+    def test_no_distance_same_town(self):
+        from scrapers.locations import parse_location
+        # Same-town cards omit the (N km) entirely.
+        assert parse_location("Gangelt") == (None, "Gangelt", None)
+
+    def test_no_distance_with_plz(self):
+        from scrapers.locations import parse_location
+        # Nationwide-fallback cards: PLZ + city, no km — exactly what
+        # kleinanzeigen serves when the silent radius fallback fires.
+        assert parse_location("55411 Bingen") == ("55411", "Bingen", None)
+
+    def test_city_with_district_dash(self):
+        from scrapers.locations import parse_location
+        assert parse_location("50858 Köln-Junkersdorf (60 km)") == ("50858", "Köln-Junkersdorf", 60)
+
+    def test_empty(self):
+        from scrapers.locations import parse_location
+        assert parse_location("") == (None, None, None)
+        assert parse_location(None) == (None, None, None)
+
+    def test_garbage_doesnt_raise(self):
+        from scrapers.locations import parse_location
+        # Anything that doesn't parse should return None for unidentified
+        # parts rather than throwing.
+        assert parse_location("???") == (None, "???", None)
