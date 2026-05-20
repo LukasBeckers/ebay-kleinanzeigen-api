@@ -336,6 +336,7 @@ class UltraOptimizedScraper:
         page_count: int = 1,
         category: str = None,
         sort: str = None,
+        attribute_filters: Dict[str, str] = None,
     ) -> Dict[str, Any]:
         """
         Ultra-optimized multi-page scraping with all performance enhancements.
@@ -362,6 +363,7 @@ class UltraOptimizedScraper:
                 max_price=max_price,
                 category=category,
                 sort=sort,
+                attribute_filters=attribute_filters,
             )
 
             # Create page fetch tasks
@@ -513,6 +515,7 @@ async def ultra_optimized_scrape_inserate(
     page_count: int = 1,
     category: str = None,
     sort: str = None,
+    attribute_filters: Dict[str, str] = None,
 ) -> Dict[str, Any]:
     """
     Direct function for ultra-optimized scraping.
@@ -536,6 +539,7 @@ async def ultra_optimized_scrape_inserate(
             page_count=page_count,
             category=category,
             sort=sort,
+            attribute_filters=attribute_filters,
         )
     finally:
         await scraper.cleanup()

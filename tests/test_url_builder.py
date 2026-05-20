@@ -149,6 +149,82 @@ class TestSort:
             build_search_url(page=1, query="x", sort="random")
 
 
+class TestAttributeFilters:
+    """Category-specific filters travel as ``+key:value`` segments appended
+    to the ``/c<id>`` slug. Verified live against c305 (motorcycles):
+
+    * enum:  ``+motorraeder_roller.type_s:motorrad``
+    * range: ``+motorraeder_roller.km_i:,50000`` (open lower bound)
+    """
+
+    def test_enum_filter_appends_to_category(self):
+        url = build_search_url(
+            page=1,
+            category="305",
+            attribute_filters={"motorraeder_roller.type_s": "motorrad"},
+        )
+        assert url == (
+            "https://www.kleinanzeigen.de/s-/seite:1/c305+motorraeder_roller.type_s:motorrad"
+        )
+
+    def test_range_filter_uses_comma_separator(self):
+        url = build_search_url(
+            page=1,
+            category="305",
+            attribute_filters={"motorraeder_roller.km_i": "10000,50000"},
+        )
+        assert "/c305+motorraeder_roller.km_i:10000,50000" in url
+
+    def test_range_filter_open_lower_bound(self):
+        # max-only is encoded with leading comma — verified live; min=0 is dropped by the site's JS.
+        url = build_search_url(
+            page=1,
+            category="305",
+            attribute_filters={"motorraeder_roller.km_i": ",50000"},
+        )
+        assert "/c305+motorraeder_roller.km_i:,50000" in url
+
+    def test_multiple_filters_chain(self):
+        url = build_search_url(
+            page=1,
+            category="305",
+            attribute_filters={
+                "motorraeder_roller.type_s": "motorrad",
+                "motorraeder_roller.km_i": ",50000",
+            },
+        )
+        # Order follows dict-insertion order (Python 3.7+).
+        assert url.endswith(
+            "/c305+motorraeder_roller.type_s:motorrad+motorraeder_roller.km_i:,50000"
+        )
+
+    def test_filter_with_location_and_price(self):
+        url = build_search_url(
+            page=2,
+            category="305",
+            location="52538",
+            radius=100,
+            min_price=0,
+            max_price=300,
+            attribute_filters={"motorraeder_roller.type_s": "mofa"},
+        )
+        assert url == (
+            "https://www.kleinanzeigen.de/s-/preis:0:300/seite:2"
+            "/c305+motorraeder_roller.type_s:mofa"
+            "?locationStr=52538&radius=100"
+        )
+
+    def test_empty_dict_is_no_op(self):
+        no_attrs = build_search_url(page=1, category="305")
+        with_empty = build_search_url(page=1, category="305", attribute_filters={})
+        assert no_attrs == with_empty
+
+    def test_attribute_filters_require_category(self):
+        import pytest as _pt
+        with _pt.raises(ValueError, match="category"):
+            build_search_url(page=1, attribute_filters={"foo.bar": "baz"})
+
+
 class TestDefaultSnapshot:
     """Backwards-compat: existing callers (proxy, hunter) pass no ``sort`` arg.
 

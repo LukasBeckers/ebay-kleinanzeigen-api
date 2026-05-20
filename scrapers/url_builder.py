@@ -36,6 +36,26 @@ def _sort_param(sort: str | None) -> str | None:
     return SORT_TOKENS[sort]
 
 
+def _attribute_suffix(attribute_filters: dict[str, str] | None) -> str:
+    """Encode category-specific filters as ``+key:value`` segments.
+
+    Kleinanzeigen.de appends these directly to the ``/c<id>`` segment.
+    Verified live against the motorcycles category (c305):
+
+    * **Enum** (single value): ``+motorraeder_roller.type_s:motorrad``
+    * **Range**: ``+motorraeder_roller.km_i:<min>,<max>`` (comma separator,
+      either side may be the empty string for an open bound).  Note: the
+      site's JS treats ``min=0`` as "no minimum" and drops the filter; the
+      caller must emit an empty string, not ``"0"``, for an open lower bound.
+    * **Multiple filters** chain with more ``+`` separators.
+
+    Returns the suffix (e.g. ``"+key1:val1+key2:val2"``) or ``""``.
+    """
+    if not attribute_filters:
+        return ""
+    return "".join(f"+{k}:{v}" for k, v in attribute_filters.items())
+
+
 def build_search_url_template(
     *,
     query: str | None = None,
@@ -45,6 +65,7 @@ def build_search_url_template(
     max_price: int | None = None,
     category: str | None = None,
     sort: str | None = None,
+    attribute_filters: dict[str, str] | None = None,
 ) -> str:
     """Return a URL with a literal ``{page}`` placeholder for the page number.
 
@@ -68,12 +89,24 @@ def build_search_url_template(
     to default newest-first).  ``sort=None`` (or ``"newest"``) emits no
     ``sortingField`` parameter at all so the URL stays byte-identical to what
     the builder produced before sort existed.
+
+    ``attribute_filters`` is a dict of category-specific filters appended to
+    the ``/c<id>`` segment as ``+key:value`` (see ``_attribute_suffix``).  It
+    requires ``category`` to be set; kleinanzeigen.de silently drops the
+    segments otherwise.
     """
+    if attribute_filters and not category:
+        raise ValueError(
+            "attribute_filters require category — kleinanzeigen.de only honors "
+            "+key:value segments when appended to /c<id>"
+        )
+
     price = _price_path(min_price, max_price)
+    attr_suffix = _attribute_suffix(attribute_filters)
 
     cat = category.lstrip("c") if category else ""
     if cat:
-        path = f"/s-{price}/seite:{{page}}/c{cat}"
+        path = f"/s-{price}/seite:{{page}}/c{cat}{attr_suffix}"
     else:
         path = f"{price}/s-seite:{{page}}"
 
