@@ -13,6 +13,7 @@ from typing import List, Dict, Any, Tuple
 
 from scrapers.url_builder import build_search_url_template
 from scrapers.dates import parse_listing_date
+from scrapers.locations import parse_location
 
 from fastapi import HTTPException
 
@@ -141,9 +142,14 @@ class UltraOptimizedScraper:
             # Card-level posted-at — kleinanzeigen renders this as
             # "Heute, HH:MM" / "Gestern, HH:MM" / "DD.MM.YYYY".
             date_task = self._get_text_content(article, "div.aditem-main--top--right")
+            # Card-level location — "<PLZ> <city> (<N> km)" or just "<city>"
+            # for same-town listings.  Used by the hunter to filter out
+            # nationwide-fallback responses kleinanzeigen occasionally
+            # serves when the in-radius pool is empty.
+            loc_task = self._get_text_content(article, "div.aditem-main--top--left")
 
-            title_text, price_text, description_text, date_text = await asyncio.gather(
-                title_task, price_task, desc_task, date_task, return_exceptions=True
+            title_text, price_text, description_text, date_text, loc_text = await asyncio.gather(
+                title_task, price_task, desc_task, date_task, loc_task, return_exceptions=True
             )
 
             # Process price text efficiently
@@ -160,6 +166,9 @@ class UltraOptimizedScraper:
             posted_at_raw = date_text.strip() if isinstance(date_text, str) else ""
             posted_at = parse_listing_date(posted_at_raw)
 
+            location_raw = loc_text.strip() if isinstance(loc_text, str) else ""
+            location_zip, location_city, distance_km = parse_location(location_raw)
+
             return {
                 "adid": data_adid,
                 "url": f"https://www.kleinanzeigen.de{data_href}",
@@ -170,6 +179,9 @@ class UltraOptimizedScraper:
                 else "",
                 "posted_at": posted_at,
                 "posted_at_raw": posted_at_raw,
+                "location_zip": location_zip,
+                "location_city": location_city,
+                "distance_km": distance_km,
             }
 
         except Exception:
@@ -324,6 +336,7 @@ class UltraOptimizedScraper:
         page_count: int = 1,
         category: str = None,
         sort: str = None,
+        attribute_filters: Dict[str, str] = None,
     ) -> Dict[str, Any]:
         """
         Ultra-optimized multi-page scraping with all performance enhancements.
@@ -350,6 +363,7 @@ class UltraOptimizedScraper:
                 max_price=max_price,
                 category=category,
                 sort=sort,
+                attribute_filters=attribute_filters,
             )
 
             # Create page fetch tasks
@@ -501,6 +515,7 @@ async def ultra_optimized_scrape_inserate(
     page_count: int = 1,
     category: str = None,
     sort: str = None,
+    attribute_filters: Dict[str, str] = None,
 ) -> Dict[str, Any]:
     """
     Direct function for ultra-optimized scraping.
@@ -524,6 +539,7 @@ async def ultra_optimized_scrape_inserate(
             page_count=page_count,
             category=category,
             sort=sort,
+            attribute_filters=attribute_filters,
         )
     finally:
         await scraper.cleanup()

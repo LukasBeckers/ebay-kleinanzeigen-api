@@ -91,6 +91,33 @@ async def test_posted_at_present_and_descending_on_page_1():
     )
 
 
+async def test_distance_km_present_for_radius_searches():
+    """Every card on a radius-bounded search should carry a parseable
+    ``distance_km`` so the hunter can post-filter against kleinanzeigen's
+    silent-fallback responses."""
+    data = await _get(
+        "/inserate",
+        location="52538", radius=75, min_price=30, max_price=200,
+        category="305", page_count=1,
+    )
+    results = data.get("results") or []
+    assert len(results) >= 20
+    with_distance = [r for r in results if r.get("distance_km") is not None]
+    # Same-town listings have no km tag; allow up to 25% misses.  Most
+    # cards on a 75km radius search should report a numeric distance.
+    assert len(with_distance) >= len(results) * 0.75, (
+        f"only {len(with_distance)}/{len(results)} cards had a parseable "
+        f"distance_km — extractor likely broken"
+    )
+    # Sanity: every distance is within ~radius (since this is a normal,
+    # non-fallback response).  Allow some kleinanzeigen rounding slack.
+    over = [r for r in with_distance if r["distance_km"] > 90]
+    assert len(over) == 0, (
+        f"{len(over)} listings outside the requested radius — "
+        f"either a bug or the silent-fallback fired"
+    )
+
+
 async def test_sort_price_asc_first_prices_non_decreasing():
     data = await _get(
         "/inserate",
