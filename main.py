@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
     EventLoopOptimizer.optimize_event_loop()
 
     # Startup: Initialize shared browser manager with optimized settings
-    browser_manager = OptimizedPlaywrightManager(max_contexts=20, max_concurrent=10)
+    browser_manager = OptimizedPlaywrightManager(max_contexts=20, max_concurrent=3)
     await browser_manager.start()
 
     # Store browser manager in app state for access by routers

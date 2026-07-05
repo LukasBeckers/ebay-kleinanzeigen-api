@@ -12,8 +12,12 @@ import gc
 from typing import List, Dict, Any, Tuple
 
 from scrapers.url_builder import build_search_url_template
-from scrapers.dates import parse_listing_date
-from scrapers.locations import parse_location
+from scrapers.search_listings import (
+    EXTRACT_ARTICLE_JS,
+    SEARCH_HYDRATION_SELECTOR,
+    SEARCH_ARTICLE_SELECTOR,
+    raw_fields_to_listing,
+)
 
 from fastapi import HTTPException
 
@@ -74,43 +78,29 @@ class UltraOptimizedScraper:
     @monitor_slow_coroutines(threshold=0.5)
     async def extract_ads_optimized(self, page) -> List[Dict[str, Any]]:
         """
-        Optimized ad extraction with memory management.
+        Extract organic search results from legacy or modern card layouts.
 
-        Uses efficient DOM querying and immediate result processing
-        to minimize memory usage.
+        Kleinanzeigen serves ``li.ad-listitem`` cards on a context's first
+        visit and ``li[data-clickable="card"]`` Tailwind cards on later
+        navigations in the same browser context.  Both layouts keep
+        ``article[data-adid]`` inside ``#srchrslt-adtable``.
         """
         try:
-            # Scope to the main search-results list (#srchrslt-adtable) so we
-            # never pick up "Auch interessant" / related-items panels that
-            # appear on sparse search result pages.  Without this scoping,
-            # queries that match few items can get polluted with algorithmic
-            # suggestions from unrelated categories.
-            items = await page.query_selector_all(
-                "#srchrslt-adtable .ad-listitem:not(.is-topad):not(.badge-hint-pro-small-srp) article[data-adid]"
-            )
-
+            items = await page.query_selector_all(SEARCH_ARTICLE_SELECTOR)
             results = []
 
-            # Process items in batches to control memory usage
             batch_size = 10
             for i in range(0, len(items), batch_size):
                 batch = items[i : i + batch_size]
-
-                # Process batch concurrently
-                batch_tasks = []
-                for item in batch:
-                    batch_tasks.append(self._extract_single_ad(item))
-
+                batch_tasks = [self._extract_single_ad(item) for item in batch]
                 batch_results = await asyncio.gather(
                     *batch_tasks, return_exceptions=True
                 )
 
-                # Filter successful results
                 for result in batch_results:
                     if isinstance(result, dict):
                         results.append(result)
 
-                # Periodic memory cleanup
                 if i % (batch_size * 5) == 0:
                     gc.collect()
 
@@ -119,83 +109,15 @@ class UltraOptimizedScraper:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def _extract_single_ad(self, article) -> Dict[str, Any]:
-        """Extract data from a single ad article element."""
+    async def _extract_single_ad(self, article) -> Dict[str, Any] | None:
+        """Extract one listing card (legacy or modern layout)."""
         try:
-            # Get basic attributes first (fastest operations)
-            data_adid = await article.get_attribute("data-adid")
-            data_href = await article.get_attribute("data-href")
-
-            if not data_adid or not data_href:
+            raw = await article.evaluate(EXTRACT_ARTICLE_JS)
+            if not raw:
                 return None
-
-            # Parallel extraction of text content
-            title_task = self._get_text_content(
-                article, "h2.text-module-begin a.ellipsis"
-            )
-            price_task = self._get_text_content(
-                article, "p.aditem-main--middle--price-shipping--price"
-            )
-            desc_task = self._get_text_content(
-                article, "p.aditem-main--middle--description"
-            )
-            # Card-level posted-at — kleinanzeigen renders this as
-            # "Heute, HH:MM" / "Gestern, HH:MM" / "DD.MM.YYYY".
-            date_task = self._get_text_content(article, "div.aditem-main--top--right")
-            # Card-level location — "<PLZ> <city> (<N> km)" or just "<city>"
-            # for same-town listings.  Used by the hunter to filter out
-            # nationwide-fallback responses kleinanzeigen occasionally
-            # serves when the in-radius pool is empty.
-            loc_task = self._get_text_content(article, "div.aditem-main--top--left")
-
-            title_text, price_text, description_text, date_text, loc_text = await asyncio.gather(
-                title_task, price_task, desc_task, date_task, loc_task, return_exceptions=True
-            )
-
-            # Process price text efficiently
-            if isinstance(price_text, str):
-                price_text = (
-                    price_text.replace("€", "")
-                    .replace("VB", "")
-                    .replace(".", "")
-                    .strip()
-                )
-            else:
-                price_text = ""
-
-            posted_at_raw = date_text.strip() if isinstance(date_text, str) else ""
-            posted_at = parse_listing_date(posted_at_raw)
-
-            location_raw = loc_text.strip() if isinstance(loc_text, str) else ""
-            location_zip, location_city, distance_km = parse_location(location_raw)
-
-            return {
-                "adid": data_adid,
-                "url": f"https://www.kleinanzeigen.de{data_href}",
-                "title": title_text if isinstance(title_text, str) else "",
-                "price": price_text,
-                "description": description_text
-                if isinstance(description_text, str)
-                else "",
-                "posted_at": posted_at,
-                "posted_at_raw": posted_at_raw,
-                "location_zip": location_zip,
-                "location_city": location_city,
-                "distance_km": distance_km,
-            }
-
+            return raw_fields_to_listing(raw)
         except Exception:
             return None
-
-    async def _get_text_content(self, parent_element, selector: str) -> str:
-        """Efficiently get text content from an element."""
-        try:
-            element = await parent_element.query_selector(selector)
-            if element:
-                return await element.inner_text()
-            return ""
-        except Exception:
-            return ""
 
     @monitor_slow_coroutines(threshold=2.0)
     async def ultra_optimized_fetch_page(
@@ -218,28 +140,18 @@ class UltraOptimizedScraper:
             start_time = time.time()
             last_error = None
 
-            for attempt in range(retry_count + 1):
+            async def fetch_operation():
                 context = None
                 page = None
-
                 try:
-                    # Get context from pool (optimized)
                     context = await self.browser_manager.get_context()
                     page = await context.new_page()
 
-                    # Optimized page loading with minimal wait
                     await page.goto(url, timeout=60000, wait_until="domcontentloaded")
 
-                    # Wait for the *organic* result grid to hydrate.  The old
-                    # selector ``.ad-listitem`` matched sponsored cards above
-                    # the fold too, so it'd succeed in <100ms even when
-                    # ``#srchrslt-adtable`` was still empty — and a fast
-                    # extraction against the un-hydrated DOM silently returned
-                    # zero listings.  Scoping to the result grid + raising
-                    # PageNotReadyError lets the existing retry kick in.
                     try:
                         await page.wait_for_selector(
-                            "#srchrslt-adtable .ad-listitem article[data-adid]",
+                            SEARCH_HYDRATION_SELECTOR,
                             timeout=15000,
                             state="attached",
                         )
@@ -248,8 +160,18 @@ class UltraOptimizedScraper:
                             f"page {page_num} hydration timeout: {url}"
                         )
 
-                    # Extract ads with optimized method
-                    results = await self.extract_ads_optimized(page)
+                    return await self.extract_ads_optimized(page)
+                finally:
+                    if page:
+                        await page.close()
+                    if context:
+                        await self.browser_manager.release_context(context)
+
+            for attempt in range(retry_count + 1):
+                try:
+                    results = await self.browser_manager.execute_with_semaphore(
+                        fetch_operation()
+                    )
                     # ErrorLogger wraps a stdlib logger at ``.logger``.
                     logger.logger.info(
                         f"page {page_num} extracted {len(results)} listings"
@@ -301,15 +223,7 @@ class UltraOptimizedScraper:
                         await asyncio.sleep(wait_time)
                         continue
 
-                    # All retries exhausted
                     break
-
-                finally:
-                    # Cleanup resources immediately
-                    if page:
-                        await page.close()
-                    if context:
-                        await self.browser_manager.release_context(context)
 
             # Create failed metrics
             error_msg = str(last_error) if last_error else "Unknown error"
@@ -456,9 +370,8 @@ class UltraOptimizedScraper:
                 duration=request_metrics.total_time,
             )
 
-            # Prepare ultra-comprehensive response
             response = {
-                "success": True,
+                "success": successful_pages > 0,
                 "results": all_results,
                 "unique_results": len(all_results),
                 "time_taken": round(request_metrics.total_time, 3),

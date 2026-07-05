@@ -231,8 +231,9 @@ Performance tests conducted on **Arch Linux** with **Intel i7-1260P** processor:
 
 - **uvloop Integration**: High-performance asyncio event loop
 - **Context Pooling**: Efficient browser resource reuse
+- **Dual-layout search scraping**: Supports legacy ``li.ad-listitem`` cards and Kleinanzeigen's modern ``li[data-clickable="card"]`` Tailwind layout (the latter is served on repeat visits in the same browser context)
 - **Memory Optimization**: Automatic garbage collection and efficient processing
-- **Intelligent Concurrency**: Optimal concurrent processing with resource control
+- **Intelligent Concurrency**: Search scrapes share the global Playwright semaphore (`max_concurrent=3`) to limit parallel Chromium tabs
 
 ### 🔧 Production Ready
 
