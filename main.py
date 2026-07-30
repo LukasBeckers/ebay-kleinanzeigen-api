@@ -23,7 +23,9 @@ async def lifespan(app: FastAPI):
     # Optimize event loop settings
     EventLoopOptimizer.optimize_event_loop()
 
-    # Startup: Initialize shared browser manager with optimized settings
+    # Startup: Initialize shared browser manager with optimized settings.
+    # Chromium is fully restarted every BROWSER_RECYCLE_EVERY scrape ops
+    # (default 10_000) to avoid long-lived browser degradation.
     browser_manager = OptimizedPlaywrightManager(max_contexts=20, max_concurrent=3)
     await browser_manager.start()
 
@@ -43,10 +45,20 @@ app = FastAPI(version="1.0.0", lifespan=lifespan)
 
 @app.get("/")
 async def root():
+    metrics = {}
+    if browser_manager is not None:
+        metrics = browser_manager.get_performance_metrics()
     return {
         "message": "Welcome to the Kleinanzeigen API",
         "endpoints": ["/inserate", "/inserat/{id}", "/inserate-detailed"],
         "status": "operational",
+        "browser": {
+            "recycle_every": metrics.get("recycle_every"),
+            "total_requests": metrics.get("total_requests"),
+            "requests_since_recycle": metrics.get("requests_since_recycle"),
+            "browser_generations": metrics.get("browser_generations"),
+            "recycle_count": metrics.get("recycle_count"),
+        },
     }
 
 

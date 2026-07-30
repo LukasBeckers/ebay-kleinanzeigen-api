@@ -1,0 +1,10 @@
+services:
+  ebay-kleinanzeigen-api:
+    build: .
+    image: ebay-kleinanzeigen-api
+    container_name: ebay-kleinanzeigen-api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      - BROWSER_RECYCLE_EVERY=10000
