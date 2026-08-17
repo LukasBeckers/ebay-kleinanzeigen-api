@@ -63,9 +63,11 @@ The API will be available at `http://localhost:8000`
 ### Browser recycle
 
 The shared Playwright Chromium is **fully restarted every 10 000 scrape
-operations** (each `execute_with_semaphore` completion counts as one). This
-avoids hung `Page.goto` timeouts and empty search pages that build up when the
-same browser process runs for weeks.
+operations** (each `execute_with_semaphore` completion counts as one), even
+when the worker is busy. In-flight scrapes finish on the old browser; new
+requests wait until the restart completes. They are not cancelled. This
+avoids hung `Page.goto` timeouts and empty search pages that build up when
+the same browser process runs for weeks under continuous load.
 
 Override the interval with env:
 

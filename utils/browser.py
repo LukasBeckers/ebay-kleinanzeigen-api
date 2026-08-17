@@ -137,9 +137,11 @@ class OptimizedPlaywrightManager:
             self._playwright = None
 
     async def recycle_browser(self, *, reason: str = "scheduled") -> None:
-        """Force a full browser restart once in-flight operations drain.
+        """Force a full browser restart after in-flight operations drain.
 
-        Safe to call concurrently; only one recycle runs at a time.
+        New ``execute_with_semaphore`` callers wait. Already-running scrapes
+        finish on the current browser (they are not cancelled). Safe to call
+        concurrently; only one recycle runs at a time.
         """
         async with self._state_lock:
             if self._recycling:
@@ -193,19 +195,27 @@ class OptimizedPlaywrightManager:
             await self._recycle_done.wait()
 
     async def _maybe_schedule_recycle(self) -> None:
-        """If the request threshold was hit and nothing is in flight, recycle."""
+        """Recycle once ``recycle_every`` scrapes have completed.
+
+        Does not wait for the worker to go idle. In-flight ops drain first
+        (see ``recycle_browser``); new work queues behind the recycle flag.
+        """
         async with self._state_lock:
             should = (
                 self._requests_since_recycle >= self._recycle_every
-                and self._concurrent_operations <= 0
                 and not self._recycling
             )
         if should:
             await self.recycle_browser(reason=f"every_{self._recycle_every}_requests")
 
     async def get_context(self) -> BrowserContext:
-        """Get a browser context from the pool or create a new one"""
-        await self._wait_if_recycling()
+        """Get a browser context from the pool or create a new one.
+
+        Must not wait on recycle: in-flight scrapes call this while recycle
+        is draining them. Waiting here deadlocks (recycle waits for inflight,
+        inflight waits for recycle). New work is gated in
+        ``execute_with_semaphore`` / ``new_context_page`` instead.
+        """
         async with self._context_lock:
             if self._browser is None:
                 await self._launch_browser()
