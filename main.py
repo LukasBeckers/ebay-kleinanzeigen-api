@@ -1,5 +1,9 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from routers import (
     inserate_ultra as inserate,
     inserat,
@@ -41,6 +45,39 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(version="1.0.0", lifespan=lifespan)
+
+
+class _RecycleHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        mgr = getattr(request.app.state, "browser_manager", None)
+        if mgr is not None:
+            metrics = mgr.get_performance_metrics()
+            response.headers["X-Recycle-Every"] = str(metrics["recycle_every"])
+            response.headers["X-Requests-Since-Recycle"] = str(
+                metrics["requests_since_recycle"]
+            )
+            response.headers["X-Recycle-Count"] = str(metrics["recycle_count"])
+        return response
+
+
+app.add_middleware(_RecycleHeadersMiddleware)
+
+
+class RecycleEveryBody(BaseModel):
+    recycle_every: int = Field(..., ge=1)
+
+
+@app.post("/browser/recycle-every")
+async def set_recycle_every(body: RecycleEveryBody):
+    """Set Chromium recycle interval (scrape count). Runtime only; not env."""
+    if browser_manager is None:
+        raise HTTPException(status_code=503, detail="browser not ready")
+    try:
+        browser_manager.set_recycle_every(body.recycle_every)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"browser": browser_manager.get_performance_metrics()}
 
 
 @app.get("/")

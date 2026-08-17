@@ -303,6 +303,18 @@ class OptimizedPlaywrightManager:
             self._requests_since_recycle += 1
         await self._maybe_schedule_recycle()
 
+    def set_recycle_every(self, recycle_every: int) -> None:
+        """Change the request-count recycle threshold at runtime.
+
+        Does not persist to env. If ``requests_since_recycle`` is already
+        at or above the new value, the next completed scrape starts recycle.
+        """
+        n = int(recycle_every)
+        if n < 1:
+            raise ValueError("recycle_every must be >= 1")
+        self._recycle_every = n
+        logger.info("recycle_every set to %d", n)
+
     def get_performance_metrics(self) -> dict:
         """Get current performance metrics"""
         return {

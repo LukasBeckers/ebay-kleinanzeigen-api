@@ -76,7 +76,21 @@ BROWSER_RECYCLE_EVERY=10000
 ```
 
 `GET /` reports `browser.total_requests`, `requests_since_recycle`,
-`browser_generations`, and `recycle_count` for ops checks.
+`browser_generations`, and `recycle_count` for ops checks. Every response
+also carries `X-Recycle-Every`, `X-Requests-Since-Recycle`, and
+`X-Recycle-Count` so the proxy admin UI can show live recycle state.
+
+Change the interval at runtime (does not rewrite env; restart reloads
+`BROWSER_RECYCLE_EVERY`):
+
+```sh
+curl -X POST http://localhost:8000/browser/recycle-every \
+  -H 'Content-Type: application/json' \
+  -d '{"recycle_every": 500}'
+```
+
+If `requests_since_recycle` is already at or above the new value, the next
+completed scrape starts a recycle.
 
 ### Installation using UV
 
