@@ -14,6 +14,8 @@ anyio==4.9.0
     #   starlette
 attrs==25.3.0
     # via aiohttp
+beautifulsoup4==4.14.3
+    # via ebay-kleinanzeigen-api (pyproject.toml)
 certifi==2025.7.14
     # via
     #   httpcore

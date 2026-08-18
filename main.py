@@ -4,6 +4,7 @@ from routers import (
     inserate_ultra as inserate,
     inserat,
     inserate_detailed_ultra as inserate_detailed,
+    seller,
 )
 from utils.browser import OptimizedPlaywrightManager
 from utils.asyncio_optimizations import EventLoopOptimizer
@@ -45,7 +46,12 @@ app = FastAPI(version="1.0.0", lifespan=lifespan)
 async def root():
     return {
         "message": "Welcome to the Kleinanzeigen API",
-        "endpoints": ["/inserate", "/inserat/{id}", "/inserate-detailed"],
+        "endpoints": [
+            "/inserate",
+            "/inserat/{id}",
+            "/inserate-detailed",
+            "/seller/{user_id}",
+        ],
         "status": "operational",
     }
 
@@ -53,3 +59,4 @@ async def root():
 app.include_router(inserate.router)
 app.include_router(inserat.router)
 app.include_router(inserate_detailed.router)
+app.include_router(seller.router)
