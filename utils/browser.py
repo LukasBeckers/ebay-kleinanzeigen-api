@@ -5,7 +5,7 @@ from typing import List
 
 from playwright.async_api import async_playwright, BrowserContext, Page
 
-from utils.user_agent import get_random_ua
+from utils.user_agent import ACCEPT_LANGUAGE, get_random_ua, platform_for_ua
 
 logger = logging.getLogger(__name__)
 
@@ -13,23 +13,23 @@ logger = logging.getLogger(__name__)
 DEFAULT_RECYCLE_EVERY = 10_000
 
 
-def build_fingerprint() -> dict:
-    """Return a single, internally-consistent browser fingerprint.
+def build_fingerprint(chrome_version: str) -> dict:
+    """Return a Playwright context fingerprint aligned with this Chromium.
 
-    Every field (UA, locale, timezone, viewport, lang header) is chosen so it
-    cross-checks against the real Chromium engine Playwright launches. Keeping
-    one coherent identity per context is what Akamai Bot Manager actually
-    scores, not the IP, so a mismatched UA (Firefox/Safari strings over a
-    Chromium engine) or the default en-US locale out of a DE-resident scraper
-    reads as bot.
+    ``chrome_version`` must be the launched browser's ``version`` so the UA
+    build matches Client Hints. Locale/timezone are de-DE because Kleinanzeigen
+    is a German site; IP reputation is a separate signal.
     """
-    ua = get_random_ua()
+    ua = get_random_ua(chrome_version)
     return {
         "user_agent": ua,
         "locale": "de-DE",
         "timezone_id": "Europe/Berlin",
         "viewport": {"width": 1440, "height": 900},
-        "extra_http_headers": {"Accept-Language": "de-DE,de;q=0.9"},
+        "extra_http_headers": {
+            "Accept-Language": ACCEPT_LANGUAGE,
+            "Sec-CH-UA-Platform": platform_for_ua(ua),
+        },
     }
 
 
@@ -43,7 +43,9 @@ class PlaywrightManager:
         self._browser = await self._playwright.chromium.launch(headless=True)
 
     async def new_context_page(self):
-        context = await self._browser.new_context(**build_fingerprint())
+        context = await self._browser.new_context(
+            **build_fingerprint(self._browser.version)
+        )
         return await context.new_page()
 
     async def close_page(self, page):
@@ -116,7 +118,9 @@ class OptimizedPlaywrightManager:
 
         initial_contexts = min(3, self._max_contexts)
         for _ in range(initial_contexts):
-            context = await self._browser.new_context(**build_fingerprint())
+            context = await self._browser.new_context(
+                **build_fingerprint(self._browser.version)
+            )
             self._context_pool.append(context)
             self._contexts_created += 1
 
@@ -248,7 +252,9 @@ class OptimizedPlaywrightManager:
 
             # Create new context if pool is empty and under limit
             if len(self._context_in_use) < self._max_contexts:
-                context = await self._browser.new_context(**build_fingerprint())
+                context = await self._browser.new_context(
+                    **build_fingerprint(self._browser.version)
+                )
                 self._context_in_use.append(context)
                 self._contexts_created += 1
                 return context

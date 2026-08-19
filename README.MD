@@ -94,17 +94,18 @@ completed scrape starts a recycle.
 
 ### Browser fingerprint
 
-Every Playwright context is created with one internally consistent identity
-that matches the Chromium engine Playwright actually launches:
+Every Playwright context uses a Chromium identity that matches the **launched**
+browser (`browser.version`), not a hardcoded Chrome build:
 
-- Chrome user-agent at the installed Chromium build (`139.0.7258.5`), never
-  Firefox or Safari strings over a Chromium binary
+- Chrome UA only (Windows NT 10.0, macOS 10_15_7, or Linux) — never Firefox
+  or Safari strings over a Chromium engine
+- `Sec-CH-UA-Platform` matches the OS claimed in that UA
 - `locale=de-DE`, `timezone_id=Europe/Berlin`
-- `Accept-Language: de-DE,de;q=0.9`
+- `Accept-Language: de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7`
 - viewport `1440×900`
 
-Mismatched UA / locale / timezone is what Akamai Bot Manager scores; a
-German-resident scraper advertising `en-US` or a Firefox UA reads as a bot.
+This keeps UA / Client Hints / locale consistent. Akamai still also scores
+IP, TLS, and `navigator.webdriver`; this is only the identity slice.
 
 ### Installation using UV
 
