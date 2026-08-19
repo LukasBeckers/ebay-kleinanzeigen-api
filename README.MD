@@ -60,6 +60,38 @@ uvicorn main:app --reload
 
 The API will be available at `http://localhost:8000`
 
+### Browser recycle
+
+The shared Playwright Chromium is **fully restarted every 10 000 scrape
+operations** (each `execute_with_semaphore` completion counts as one), even
+when the worker is busy. In-flight scrapes finish on the old browser; new
+requests wait until the restart completes. They are not cancelled. This
+avoids hung `Page.goto` timeouts and empty search pages that build up when
+the same browser process runs for weeks under continuous load.
+
+Override the interval with env:
+
+```sh
+BROWSER_RECYCLE_EVERY=10000
+```
+
+`GET /` reports `browser.total_requests`, `requests_since_recycle`,
+`browser_generations`, and `recycle_count` for ops checks. Every response
+also carries `X-Recycle-Every`, `X-Requests-Since-Recycle`, and
+`X-Recycle-Count` so the proxy admin UI can show live recycle state.
+
+Change the interval at runtime (does not rewrite env; restart reloads
+`BROWSER_RECYCLE_EVERY`):
+
+```sh
+curl -X POST http://localhost:8000/browser/recycle-every \
+  -H 'Content-Type: application/json' \
+  -d '{"recycle_every": 500}'
+```
+
+If `requests_since_recycle` is already at or above the new value, the next
+completed scrape starts a recycle.
+
 ### Installation using UV
 
 #### Prerequisites
