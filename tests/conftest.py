@@ -18,6 +18,12 @@ def motorcycles_fixture_html() -> str:
 
 
 @pytest.fixture(scope="session")
+def modern_layout_fixture_html() -> str:
+    """Minimal modern Tailwind search card layout (``li[data-clickable="card"]``)."""
+    return (FIXTURES_DIR / "motorcycles_modern_layout.html").read_text()
+
+
+@pytest.fixture(scope="session")
 def broken_category_fixture_html() -> str:
     """The page returned by the PRE-fix URL ``/c305/s-seite:1?locationStr=...``.
 

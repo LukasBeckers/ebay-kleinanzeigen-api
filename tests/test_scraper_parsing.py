@@ -48,7 +48,9 @@ class TestFixtureStructure:
 
 
 class TestSelectorScoping:
-    """The scraper's live selector targets ``#srchrslt-adtable .ad-listitem …``.
+    """The scraper targets ``#srchrslt-adtable article[data-adid]`` so both the
+    legacy ``li.ad-listitem`` cards and the modern ``li[data-clickable="card"]``
+    Tailwind layout are supported.
 
     We verify that:
       1. The container exists on a real page.
