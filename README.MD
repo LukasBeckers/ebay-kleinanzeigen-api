@@ -92,6 +92,20 @@ curl -X POST http://localhost:8000/browser/recycle-every \
 If `requests_since_recycle` is already at or above the new value, the next
 completed scrape starts a recycle.
 
+### Browser fingerprint
+
+Every Playwright context is created with one internally consistent identity
+that matches the Chromium engine Playwright actually launches:
+
+- Chrome user-agent at the installed Chromium build (`139.0.7258.5`), never
+  Firefox or Safari strings over a Chromium binary
+- `locale=de-DE`, `timezone_id=Europe/Berlin`
+- `Accept-Language: de-DE,de;q=0.9`
+- viewport `1440×900`
+
+Mismatched UA / locale / timezone is what Akamai Bot Manager scores; a
+German-resident scraper advertising `en-US` or a Firefox UA reads as a bot.
+
 ### Installation using UV
 
 #### Prerequisites
