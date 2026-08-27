@@ -5,8 +5,28 @@ from __future__ import annotations
 from typing import Any
 
 SEARCH_ADTABLE_SELECTOR = "#srchrslt-adtable"
+# Wait for the results table itself so a genuine empty search (0 cards) is
+# distinguishable from a block page that never hydrates listings.
+SEARCH_PAGE_READY_SELECTOR = SEARCH_ADTABLE_SELECTOR
 SEARCH_HYDRATION_SELECTOR = f"{SEARCH_ADTABLE_SELECTOR} article[data-adid]"
 SEARCH_ARTICLE_SELECTOR = SEARCH_HYDRATION_SELECTOR
+
+_IP_BLOCK_MARKERS = (
+    "ip-bereich",
+    "vorübergehend gesperrt",
+    "voruebergehend gesperrt",
+    "ip-eingeschraenkt",
+)
+
+
+def is_ip_block_page(html: str, status: int | None = None) -> bool:
+    """True when Kleinanzeigen refused the request (HTTP 403 or ban HTML)."""
+    if status == 403:
+        return True
+    text = (html or "").lower()
+    if "gesperrt" in text and "ip" in text:
+        return True
+    return any(marker in text for marker in _IP_BLOCK_MARKERS)
 
 SPONSORED_LI_CLASS_TOKENS = (
     "is-topad",

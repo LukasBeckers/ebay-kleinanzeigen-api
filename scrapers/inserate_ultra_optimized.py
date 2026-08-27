@@ -14,8 +14,9 @@ from typing import List, Dict, Any, Tuple
 from scrapers.url_builder import build_search_url_template
 from scrapers.search_listings import (
     EXTRACT_ARTICLE_JS,
-    SEARCH_HYDRATION_SELECTOR,
+    SEARCH_PAGE_READY_SELECTOR,
     SEARCH_ARTICLE_SELECTOR,
+    is_ip_block_page,
     raw_fields_to_listing,
 )
 
@@ -40,14 +41,17 @@ from utils.asyncio_optimizations import (
 
 
 class PageNotReadyError(Exception):
-    """Raised when a search-results page never produced visible organic listings.
+    """Raised when a search-results page never produced the results table.
 
-    The wait selector either timed out, or the page rendered (e.g. its
-    sponsored cards) but ``#srchrslt-adtable`` was still empty after extraction.
+    The wait selector timed out (and the body is not an IP-block page).
     The message includes the word "timeout" so ``ErrorClassifier`` routes this
     as ``NETWORK`` → ``is_recoverable=True`` → eligible for the existing
     exponential-backoff retry path inside ``ultra_optimized_fetch_page``.
     """
+
+
+class IpBlockedError(Exception):
+    """Kleinanzeigen returned HTTP 403 or the IP-range ban HTML."""
 
 
 class UltraOptimizedScraper:
@@ -147,19 +151,36 @@ class UltraOptimizedScraper:
                     context = await self.browser_manager.get_context()
                     page = await context.new_page()
 
-                    await page.goto(url, timeout=60000, wait_until="domcontentloaded")
+                    response = await page.goto(
+                        url, timeout=60000, wait_until="domcontentloaded"
+                    )
+                    status = response.status if response is not None else None
+                    html = await page.content()
+                    if is_ip_block_page(html, status):
+                        raise IpBlockedError(
+                            f"page {page_num} Kleinanzeigen IP block "
+                            f"(http {status}): {url}"
+                        )
 
                     try:
                         await page.wait_for_selector(
-                            SEARCH_HYDRATION_SELECTOR,
+                            SEARCH_PAGE_READY_SELECTOR,
                             timeout=15000,
                             state="attached",
                         )
                     except Exception:
+                        html = await page.content()
+                        if is_ip_block_page(html, status):
+                            raise IpBlockedError(
+                                f"page {page_num} Kleinanzeigen IP block "
+                                f"(http {status}): {url}"
+                            )
                         raise PageNotReadyError(
                             f"page {page_num} hydration timeout: {url}"
                         )
 
+                    # 0 cards after the table attached is a real empty search,
+                    # not a block — return [] as success.
                     return await self.extract_ads_optimized(page)
                 finally:
                     if page:
@@ -177,15 +198,6 @@ class UltraOptimizedScraper:
                         f"page {page_num} extracted {len(results)} listings"
                     )
 
-                    # Even after hydration, an unexpectedly empty extraction is
-                    # almost always a soft block / mid-render race — treat it
-                    # as a fetch failure so the retry path runs instead of
-                    # marking it ``success=True, results_count=0``.
-                    if not results:
-                        raise PageNotReadyError(
-                            f"page {page_num} extraction yielded 0 listings (timeout-equivalent): {url}"
-                        )
-
                     # Create successful metrics
                     metrics = PageMetrics(
                         page_number=page_num,
@@ -199,6 +211,10 @@ class UltraOptimizedScraper:
 
                     return results, metrics
 
+                except HTTPException:
+                    raise
+                except IpBlockedError as e:
+                    raise HTTPException(status_code=403, detail=str(e)) from e
                 except Exception as e:
                     last_error = e
 
