@@ -189,6 +189,39 @@ GET /inserate?query=fahrrad&location=10178&radius=5&min_price=200&page_count=5
 GET /inserat/12345
 ```
 
+#### 2b. Fetch Seller Profile
+
+**Endpoint:** `GET /seller/{user_id}`
+
+**Description:** Scrapes the public seller profile (`/s-bestandsliste.html?userId=…`). For commercial sellers with a `/pro/` shop, listing counts and shop URL are merged from that page when they are missing on the profile.
+
+Listing detail (`GET /inserat/{id}`) already includes sidebar seller fields (`id` / `user_id`, name, type, since, badges, profile URL). This endpoint adds profile-only fields: typical response time, follower count, and (on shops) ads online/total. There is no public answer-rate percentage.
+
+```sh
+curl -s http://localhost:8000/seller/1 | python -m json.tool
+```
+
+```json
+{
+  "success": true,
+  "time_taken": 2.1,
+  "data": {
+    "id": "1",
+    "name": "André",
+    "type": "private",
+    "since": "01.09.2009",
+    "badges": ["TOP Zufriedenheit", "Besonders freundlich", "Besonders zuverlässig"],
+    "url": "https://www.kleinanzeigen.de/s-bestandsliste.html?userId=1",
+    "shop_url": null,
+    "response_time": "Antwortet in der Regel innerhalb von 3 Stunden",
+    "response_time_hours": 3,
+    "followers": 27,
+    "ads_online": null,
+    "ads_total": null
+  }
+}
+```
+
 #### 3. Fetch Listings with Details (Combined)
 
 **Endpoint:** `GET /inserate-detailed`

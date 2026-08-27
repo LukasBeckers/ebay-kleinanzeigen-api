@@ -95,36 +95,32 @@ def parse_price(price_text: Optional[str]) -> Dict[str, Union[str, bool]]:
 
 
 async def get_seller_details(page: Page) -> Dict[str, Optional[str]]:
-    result = {"name": None, "since": None, "type": "private", "badges": []}
+    """Listing-sidebar seller. Profile-only fields (followers, Antwortzeit)
+    stay None here — use ``GET /seller/{user_id}`` for those."""
+    from libs.websites.seller import extract_listing_seller
 
     try:
-        # Get seller name
-        name_selector = ".userprofile-vip"
-        result["name"] = await get_element_content(page, name_selector)
-
-        # Get seller type
-        type_selector = ".userprofile-vip-details-text:has-text('Privater Nutzer'), .userprofile-vip-details-text:has-text('Gewerblicher Nutzer')"
-        seller_type = await get_element_content(page, type_selector)
-        if seller_type:
-            result["type"] = "business" if "Gewerblicher" in seller_type else "private"
-
-        # Get since date
-        since_selector = ".userprofile-vip-details-text:has-text('Aktiv seit')"
-        seller_since = await get_element_content(page, since_selector)
-        if seller_since:
-            result["since"] = seller_since.replace("Aktiv seit ", "").strip()
-
-        # Get user badges
-        badges_selector = ".userprofile-vip-badges .userbadge-tag"
-        badges = await get_elements_content(page, badges_selector)
-        result["badges"] = [
-            badge.strip() for badge in badges if badge and badge.strip()
-        ]
-
+        html = await page.content()
+        parsed = extract_listing_seller(html)
+        parsed["user_id"] = parsed.get("id")
+        return parsed
     except Exception as e:
         print(f"Error getting seller details: {str(e)}")
-
-    return result
+        return {
+            "name": None,
+            "user_id": None,
+            "id": None,
+            "since": None,
+            "type": "private",
+            "badges": [],
+            "url": None,
+            "shop_url": None,
+            "response_time": None,
+            "response_time_hours": None,
+            "followers": None,
+            "ads_online": None,
+            "ads_total": None,
+        }
 
 
 async def get_details(page: Page) -> Dict[str, str]:

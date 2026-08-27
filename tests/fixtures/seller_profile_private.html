@@ -1,0 +1,115 @@
+<!DOCTYPE html><html lang="de"><head><title>Alle Anzeigen von André | Kleinanzeigen</title></head><body>
+<section data-followed-user="1" class="l-container-row contentbox surface userprofile j-followeduser">
+                    <header class="a-single-margin l-container-row">
+                        <button
+                            aria-haspopup="dialog"
+                            aria-label="Profilinformationen öffnen"
+                            id="j-profile-info-button"
+                            class="userprofile--info icon-button">
+                            <i class="icon icon-info-green-big"></i>
+                        </button>
+                        <span class="user-profile-badge">A</span>
+                                <div id="super-user-clickable-badge" class="userprofile--superuser-badge">
+    </div>
+<h2 class="userprofile--name">
+                                    <span class="sr-only">Profil von</span>
+                                    André</h2>
+                            <div id="user-reputation" class="userprofile--reputation">
+    </div>
+
+    <link rel="stylesheet" type="text/css" href="https://www.kleinanzeigen.de/bffstatic/user-reputation/user-reputation-bundle.css"/>
+    <script type="text/javascript" src="https://www.kleinanzeigen.de/bffstatic/user-reputation/user-reputation-bundle.js"></script>
+
+    <script type="text/javascript">
+        async function getUserReputationSummaryFromHost() {
+            try {
+                const userReputationApiUrl = "https://gateway.kleinanzeigen.de/user-reputation-service/public/users/{userId}/reputation-summary";
+                const userId = "1";
+                const response = await fetch(
+                    userReputationApiUrl.replace("{userId}", encodeURIComponent(userId))
+                );
+
+                if (!response.ok) {
+                    return null;
+                }
+
+                return response.json();
+            } catch (e) {
+                return null;
+            }
+        }
+
+        getUserReputationSummaryFromHost().then(function(userReputationData) {
+            if (window.userReputation && window.userReputation.render) {
+                window.userReputation.render({
+                    containerId: "user-reputation",
+                    userReputationData: userReputationData
+                });
+            }
+        });
+    </script>
+<div class="profile-userbadges">
+                            <button class="userbadge userbadges-profile-rating key="rating"
+                                    data-badge-level="2"
+                                    data-badge-label-local=""
+                                    data-badge-name="rating"
+                                    data-contact-name="André"
+                                    data-is-commercial-viewer="false">
+                                        <span class="userbadge-tag">
+                                                    <i class="icon icon-smallest icon-rating-tag-2"></i>
+                                                    TOP&nbsp;Zufriedenheit</span>
+                                            </button>
+                                <button class="userbadge userbadges-profile-friendliness key="friendliness"
+                                    data-badge-level="2"
+                                    data-badge-label-local=""
+                                    data-badge-name="friendliness"
+                                    data-contact-name="André"
+                                    data-is-commercial-viewer="false">
+                                        <span class="userbadge-tag">
+                                                    <i class="icon icon-smallest icon-friendliness-tag"></i>
+                                                    Besonders freundlich</span>
+                                            </button>
+                                <button class="userbadge userbadges-profile-reliability key="reliability"
+                                    data-badge-level="2"
+                                    data-badge-label-local=""
+                                    data-badge-name="reliability"
+                                    data-contact-name="André"
+                                    data-is-commercial-viewer="false">
+                                        <span class="userbadge-tag">
+                                                    <i class="icon icon-smallest icon-reliability-tag"></i>
+                                                    Besonders zuverlässig</span>
+                                            </button>
+                                </div>
+                        <div class="userprofile-info">
+                            <div class="userprofile-details">
+                                <i class="icon icon-small icon-meins-small"></i>
+                                <span class="userprofile-details-text">
+                                Privater Nutzer</span>
+                            </div>
+                            <div class="userprofile-details">
+                                <i class="icon icon-small icon-bookmark-small"></i>
+                                <span class="userprofile-details-text">Aktiv seit 01.09.2009</span>
+                            </div>
+                            <div class="userprofile-details">
+                                    <i class="icon icon-small icon-clock-gray-small"></i>
+                                    <span class="userprofile-details-text">Antwortet in der Regel innerhalb von 3 Stunden</span>
+                                </div>
+                            <div class="userprofile-details">
+                                    <i class="icon icon-small icon-followers"></i>
+                                    <span class="userprofile-details-text">27 Follower</span>
+                                </div>
+                            </div>
+
+                        <div class="follow-user">
+                            <a
+                href="/m-einloggen.html?targetUrl=%2Fs-bestandsliste.html%3FuserId%3D1%26ff%3Dtrue%26csrf%3D5eecd924-aa37-4a4b-b0b0-75c5734c13ab"
+        data-gaevent="ResultsSeller,FollowUserBegin" data-gaevent-direct="true" id="follow-user-button"
+                class="button button-toggle follow-user-button"   title="Folgen" >
+
+            <i class="button-icon button-icon icon-follow-user-green"></i>
+            <span>Folgen</span>
+            </a>
+    </div>
+                    </header>
+                </section>
+</body></html>

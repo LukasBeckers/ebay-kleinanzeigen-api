@@ -8,6 +8,7 @@ from routers import (
     inserate_ultra as inserate,
     inserat,
     inserate_detailed_ultra as inserate_detailed,
+    seller,
 )
 from utils.browser import OptimizedPlaywrightManager
 from utils.asyncio_optimizations import EventLoopOptimizer
@@ -87,7 +88,12 @@ async def root():
         metrics = browser_manager.get_performance_metrics()
     return {
         "message": "Welcome to the Kleinanzeigen API",
-        "endpoints": ["/inserate", "/inserat/{id}", "/inserate-detailed"],
+        "endpoints": [
+            "/inserate",
+            "/inserat/{id}",
+            "/inserate-detailed",
+            "/seller/{user_id}",
+        ],
         "status": "operational",
         "browser": {
             "recycle_every": metrics.get("recycle_every"),
@@ -102,3 +108,4 @@ async def root():
 app.include_router(inserate.router)
 app.include_router(inserat.router)
 app.include_router(inserate_detailed.router)
+app.include_router(seller.router)
