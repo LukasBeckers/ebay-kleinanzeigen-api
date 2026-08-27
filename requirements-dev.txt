@@ -1,0 +1,6 @@
+pytest>=8.0
+pytest-asyncio>=0.23
+pytest-mock>=3.12
+beautifulsoup4>=4.12
+lxml>=5.0
+httpx>=0.28

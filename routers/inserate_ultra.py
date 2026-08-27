@@ -2,6 +2,8 @@
 Ultra-optimized router for maximum performance scraping.
 """
 
+import json
+
 from fastapi import APIRouter, Query, Request, HTTPException
 from scrapers.inserate_ultra_optimized import ultra_optimized_scrape_inserate
 
@@ -17,6 +19,20 @@ async def get_inserate_ultra_optimized(
     min_price: int = Query(None, description="Minimum price filter"),
     max_price: int = Query(None, description="Maximum price filter"),
     page_count: int = Query(1, ge=1, le=20, description="Number of pages to fetch"),
+    category: str = Query(None, description="Kleinanzeigen category id (e.g. '305' for motorcycles)"),
+    sort: str = Query(
+        None,
+        description="Server-side sort: newest | price_asc | price_desc | distance_asc",
+        pattern="^(newest|price_asc|price_desc|distance_asc)$",
+    ),
+    attribute_filters: str = Query(
+        None,
+        description=(
+            "JSON-encoded dict of category-specific filters appended to /c<id> as "
+            "+key:value segments. Range values use comma: '<min>,<max>'. Example: "
+            '{"motorraeder_roller.km_i": ",50000"}'
+        ),
+    ),
 ):
     """
     Fetch listings based on search criteria.
@@ -29,6 +45,21 @@ async def get_inserate_ultra_optimized(
     if not browser_manager:
         raise HTTPException(status_code=503, detail="Service unavailable")
 
+    parsed_attribute_filters: dict[str, str] | None = None
+    if attribute_filters:
+        try:
+            parsed_attribute_filters = json.loads(attribute_filters)
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"attribute_filters not JSON: {e}")
+        if not isinstance(parsed_attribute_filters, dict) or not all(
+            isinstance(k, str) and isinstance(v, str)
+            for k, v in parsed_attribute_filters.items()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="attribute_filters must be a JSON object of string→string",
+            )
+
     try:
         # Execute ultra-optimized scraping
         result = await ultra_optimized_scrape_inserate(
@@ -39,6 +70,9 @@ async def get_inserate_ultra_optimized(
             min_price=min_price,
             max_price=max_price,
             page_count=page_count,
+            category=category,
+            sort=sort,
+            attribute_filters=parsed_attribute_filters,
         )
 
         # Clean up response - remove excessive metrics for production

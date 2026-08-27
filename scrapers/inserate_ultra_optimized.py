@@ -9,8 +9,16 @@ import asyncio
 import time
 import random
 import gc
-from urllib.parse import urlencode
 from typing import List, Dict, Any, Tuple
+
+from scrapers.url_builder import build_search_url_template
+from scrapers.search_listings import (
+    EXTRACT_ARTICLE_JS,
+    SEARCH_PAGE_READY_SELECTOR,
+    SEARCH_ARTICLE_SELECTOR,
+    is_ip_block_page,
+    raw_fields_to_listing,
+)
 
 from fastapi import HTTPException
 
@@ -30,6 +38,20 @@ from utils.asyncio_optimizations import (
     EventLoopOptimizer,
     monitor_slow_coroutines,
 )
+
+
+class PageNotReadyError(Exception):
+    """Raised when a search-results page never produced the results table.
+
+    The wait selector timed out (and the body is not an IP-block page).
+    The message includes the word "timeout" so ``ErrorClassifier`` routes this
+    as ``NETWORK`` → ``is_recoverable=True`` → eligible for the existing
+    exponential-backoff retry path inside ``ultra_optimized_fetch_page``.
+    """
+
+
+class IpBlockedError(Exception):
+    """Kleinanzeigen returned HTTP 403 or the IP-range ban HTML."""
 
 
 class UltraOptimizedScraper:
@@ -60,39 +82,29 @@ class UltraOptimizedScraper:
     @monitor_slow_coroutines(threshold=0.5)
     async def extract_ads_optimized(self, page) -> List[Dict[str, Any]]:
         """
-        Optimized ad extraction with memory management.
+        Extract organic search results from legacy or modern card layouts.
 
-        Uses efficient DOM querying and immediate result processing
-        to minimize memory usage.
+        Kleinanzeigen serves ``li.ad-listitem`` cards on a context's first
+        visit and ``li[data-clickable="card"]`` Tailwind cards on later
+        navigations in the same browser context.  Both layouts keep
+        ``article[data-adid]`` inside ``#srchrslt-adtable``.
         """
         try:
-            # Use more specific selector to reduce DOM traversal
-            items = await page.query_selector_all(
-                ".ad-listitem:not(.is-topad):not(.badge-hint-pro-small-srp) article[data-adid]"
-            )
-
+            items = await page.query_selector_all(SEARCH_ARTICLE_SELECTOR)
             results = []
 
-            # Process items in batches to control memory usage
             batch_size = 10
             for i in range(0, len(items), batch_size):
                 batch = items[i : i + batch_size]
-
-                # Process batch concurrently
-                batch_tasks = []
-                for item in batch:
-                    batch_tasks.append(self._extract_single_ad(item))
-
+                batch_tasks = [self._extract_single_ad(item) for item in batch]
                 batch_results = await asyncio.gather(
                     *batch_tasks, return_exceptions=True
                 )
 
-                # Filter successful results
                 for result in batch_results:
                     if isinstance(result, dict):
                         results.append(result)
 
-                # Periodic memory cleanup
                 if i % (batch_size * 5) == 0:
                     gc.collect()
 
@@ -101,64 +113,15 @@ class UltraOptimizedScraper:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def _extract_single_ad(self, article) -> Dict[str, Any]:
-        """Extract data from a single ad article element."""
+    async def _extract_single_ad(self, article) -> Dict[str, Any] | None:
+        """Extract one listing card (legacy or modern layout)."""
         try:
-            # Get basic attributes first (fastest operations)
-            data_adid = await article.get_attribute("data-adid")
-            data_href = await article.get_attribute("data-href")
-
-            if not data_adid or not data_href:
+            raw = await article.evaluate(EXTRACT_ARTICLE_JS)
+            if not raw:
                 return None
-
-            # Parallel extraction of text content
-            title_task = self._get_text_content(
-                article, "h2.text-module-begin a.ellipsis"
-            )
-            price_task = self._get_text_content(
-                article, "p.aditem-main--middle--price-shipping--price"
-            )
-            desc_task = self._get_text_content(
-                article, "p.aditem-main--middle--description"
-            )
-
-            title_text, price_text, description_text = await asyncio.gather(
-                title_task, price_task, desc_task, return_exceptions=True
-            )
-
-            # Process price text efficiently
-            if isinstance(price_text, str):
-                price_text = (
-                    price_text.replace("€", "")
-                    .replace("VB", "")
-                    .replace(".", "")
-                    .strip()
-                )
-            else:
-                price_text = ""
-
-            return {
-                "adid": data_adid,
-                "url": f"https://www.kleinanzeigen.de{data_href}",
-                "title": title_text if isinstance(title_text, str) else "",
-                "price": price_text,
-                "description": description_text
-                if isinstance(description_text, str)
-                else "",
-            }
-
+            return raw_fields_to_listing(raw)
         except Exception:
             return None
-
-    async def _get_text_content(self, parent_element, selector: str) -> str:
-        """Efficiently get text content from an element."""
-        try:
-            element = await parent_element.query_selector(selector)
-            if element:
-                return await element.inner_text()
-            return ""
-        except Exception:
-            return ""
 
     @monitor_slow_coroutines(threshold=2.0)
     async def ultra_optimized_fetch_page(
@@ -181,29 +144,59 @@ class UltraOptimizedScraper:
             start_time = time.time()
             last_error = None
 
-            for attempt in range(retry_count + 1):
+            async def fetch_operation():
                 context = None
                 page = None
-
                 try:
-                    # Get context from pool (optimized)
                     context = await self.browser_manager.get_context()
                     page = await context.new_page()
 
-                    # Optimized page loading with minimal wait
-                    await page.goto(url, timeout=60000, wait_until="domcontentloaded")
+                    response = await page.goto(
+                        url, timeout=60000, wait_until="domcontentloaded"
+                    )
+                    status = response.status if response is not None else None
+                    html = await page.content()
+                    if is_ip_block_page(html, status):
+                        raise IpBlockedError(
+                            f"page {page_num} Kleinanzeigen IP block "
+                            f"(http {status}): {url}"
+                        )
 
-                    # Wait for essential content only
                     try:
                         await page.wait_for_selector(
-                            ".ad-listitem", timeout=5000, state="visible"
+                            SEARCH_PAGE_READY_SELECTOR,
+                            timeout=15000,
+                            state="attached",
                         )
                     except Exception:
-                        # Continue even if selector not found - might be empty page
-                        pass
+                        html = await page.content()
+                        if is_ip_block_page(html, status):
+                            raise IpBlockedError(
+                                f"page {page_num} Kleinanzeigen IP block "
+                                f"(http {status}): {url}"
+                            )
+                        raise PageNotReadyError(
+                            f"page {page_num} hydration timeout: {url}"
+                        )
 
-                    # Extract ads with optimized method
-                    results = await self.extract_ads_optimized(page)
+                    # 0 cards after the table attached is a real empty search,
+                    # not a block — return [] as success.
+                    return await self.extract_ads_optimized(page)
+                finally:
+                    if page:
+                        await page.close()
+                    if context:
+                        await self.browser_manager.release_context(context)
+
+            for attempt in range(retry_count + 1):
+                try:
+                    results = await self.browser_manager.execute_with_semaphore(
+                        fetch_operation()
+                    )
+                    # ErrorLogger wraps a stdlib logger at ``.logger``.
+                    logger.logger.info(
+                        f"page {page_num} extracted {len(results)} listings"
+                    )
 
                     # Create successful metrics
                     metrics = PageMetrics(
@@ -218,6 +211,10 @@ class UltraOptimizedScraper:
 
                     return results, metrics
 
+                except HTTPException:
+                    raise
+                except IpBlockedError as e:
+                    raise HTTPException(status_code=403, detail=str(e)) from e
                 except Exception as e:
                     last_error = e
 
@@ -242,15 +239,7 @@ class UltraOptimizedScraper:
                         await asyncio.sleep(wait_time)
                         continue
 
-                    # All retries exhausted
                     break
-
-                finally:
-                    # Cleanup resources immediately
-                    if page:
-                        await page.close()
-                    if context:
-                        await self.browser_manager.release_context(context)
 
             # Create failed metrics
             error_msg = str(last_error) if last_error else "Unknown error"
@@ -275,6 +264,9 @@ class UltraOptimizedScraper:
         min_price: int = None,
         max_price: int = None,
         page_count: int = 1,
+        category: str = None,
+        sort: str = None,
+        attribute_filters: Dict[str, str] = None,
     ) -> Dict[str, Any]:
         """
         Ultra-optimized multi-page scraping with all performance enhancements.
@@ -290,28 +282,19 @@ class UltraOptimizedScraper:
         tracker.start_request()
 
         with error_handling_context(operation="ultra_multi_page_scrape", logger=logger) as ctx:
-            # Build URLs efficiently
-            base_url = "https://www.kleinanzeigen.de"
-
-            # Optimized URL building
-            price_path = ""
-            if min_price is not None or max_price is not None:
-                min_str = str(min_price) if min_price is not None else ""
-                max_str = str(max_price) if max_price is not None else ""
-                price_path = f"/preis:{min_str}:{max_str}"
-
-            search_path = f"{price_path}/s-seite:{{page}}"
-
-            params = {}
-            if query:
-                params["keywords"] = query
-            if location:
-                params["locationStr"] = location
-            if radius:
-                params["radius"] = radius
-
-            param_string = f"?{urlencode(params)}" if params else ""
-            search_url = base_url + search_path.format(price_path=price_path, page='{page}') + param_string
+            # URL template has a literal ``{page}`` placeholder that each page
+            # task formats with its own page number.  See scrapers/url_builder.py
+            # for the format rationale — in particular, the category bug fix.
+            search_url = build_search_url_template(
+                query=query,
+                location=location,
+                radius=radius,
+                min_price=min_price,
+                max_price=max_price,
+                category=category,
+                sort=sort,
+                attribute_filters=attribute_filters,
+            )
 
             # Create page fetch tasks
             async def create_page_task(page_num: int):
@@ -403,9 +386,8 @@ class UltraOptimizedScraper:
                 duration=request_metrics.total_time,
             )
 
-            # Prepare ultra-comprehensive response
             response = {
-                "success": True,
+                "success": successful_pages > 0,
                 "results": all_results,
                 "unique_results": len(all_results),
                 "time_taken": round(request_metrics.total_time, 3),
@@ -460,6 +442,9 @@ async def ultra_optimized_scrape_inserate(
     min_price: int = None,
     max_price: int = None,
     page_count: int = 1,
+    category: str = None,
+    sort: str = None,
+    attribute_filters: Dict[str, str] = None,
 ) -> Dict[str, Any]:
     """
     Direct function for ultra-optimized scraping.
@@ -481,6 +466,9 @@ async def ultra_optimized_scrape_inserate(
             min_price=min_price,
             max_price=max_price,
             page_count=page_count,
+            category=category,
+            sort=sort,
+            attribute_filters=attribute_filters,
         )
     finally:
         await scraper.cleanup()

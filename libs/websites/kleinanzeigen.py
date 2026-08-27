@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional, Union, Any
+from bs4 import BeautifulSoup
 from playwright.async_api import Page, ElementHandle
 
 
@@ -16,14 +17,67 @@ async def get_elements_content(page: Page, selector: str) -> List[str]:
     return [await element.text_content() for element in elements]
 
 
-async def get_image_sources(page: Page, selector: str) -> List[str]:
-    images: List[str] = []
-    image_element: Optional[ElementHandle] = await page.query_selector(selector)
-    if image_element:
-        src: Optional[str] = await image_element.get_attribute("src")
-        if src:
-            images.append(src)
-    return images
+# Kleinanzeigen lazy-loads gallery images via the ``data-imgsrc`` attribute,
+# not ``src``.  Each picture appears twice on a detail page: once with
+# ``?rule=$_57.AUTO`` (small thumb in the carousel bar) and once with
+# ``?rule=$_59.AUTO`` (large viewport-sized image).  We keep only the large
+# variant so the returned list is one URL per actual photo.
+_LARGE_IMAGE_RULE = "?rule=$_59.AUTO"
+
+
+def extract_gallery_image_urls(html: str) -> List[str]:
+    """Pure-HTML gallery extractor.  Returns one URL per actual photo on
+    the listing's detail page, large-variant only, in DOM order.
+
+    Splitting the extraction out of the Playwright call lets us
+    regression-test against a saved HTML fixture without spinning up a
+    full browser context.  Returns ``[]`` for pages with no gallery
+    (deleted listings, error pages, etc.).
+
+    Gallery DOM (Kleinanzeigen, 2026):
+
+      <div class="vip-image-gallery galleryimage-large ...">      ← container
+        <div class="galleryimage-element ...">                    ← one per photo
+          <img src="..." data-imgsrc="...?rule=$_57.AUTO" ...>    ← thumb variant
+          <img src="..." data-imgsrc="...?rule=$_59.AUTO" ...>    ← large variant
+        </div>
+        ...
+      </div>
+
+    Note: ``id="viewad-image"`` is on each ``<img>``, not on the wrapper
+    (multiple-ID HTML; surprising, but that's how Kleinanzeigen ships
+    it) — so we anchor on the wrapper's class, not the id.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    container = soup.select_one(".vip-image-gallery")
+    if not container:
+        return []
+    urls: List[str] = []
+    seen = set()
+    for img in container.select(".galleryimage-element img[data-imgsrc]"):
+        url = img.get("data-imgsrc") or ""
+        if _LARGE_IMAGE_RULE not in url:
+            continue  # drop the doubled-up thumb-rule variants
+        if url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+    return urls
+
+
+async def get_image_sources(page: Page, selector: str = "#viewad-image") -> List[str]:
+    """Playwright wrapper around :func:`extract_gallery_image_urls`.
+
+    Pre-fix this used ``query_selector`` (singular) + the plain ``src``
+    attribute, which only captured the cover thumbnail — a listing with
+    17 photos came back as a list of length 1.  The fix delegates to a
+    pure-HTML helper that reads ``data-imgsrc`` from every gallery
+    element under ``#viewad-image``.  The ``selector`` arg is kept for
+    backward compatibility with existing callers; it's ignored when it
+    equals the default ``"#viewad-image"``.
+    """
+    html = await page.content()
+    return extract_gallery_image_urls(html)
 
 
 def parse_price(price_text: Optional[str]) -> Dict[str, Union[str, bool]]:
