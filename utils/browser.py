@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from typing import List
 
 from playwright.async_api import async_playwright, BrowserContext, Page
@@ -11,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 # Full Chromium restart after this many scrape operations (env override).
 DEFAULT_RECYCLE_EVERY = 10_000
+# Give in-flight scrapes this long to finish before a recycle closes Chromium
+# anyway. A hung navigation used to sit in this wait forever, and every new
+# scrape blocked on the recycle flag.
+DEFAULT_RECYCLE_DRAIN_TIMEOUT = 180.0
 
 
 def build_fingerprint() -> dict:
@@ -70,6 +75,7 @@ class OptimizedPlaywrightManager:
         max_contexts: int = 10,
         max_concurrent: int = 5,
         recycle_every: int | None = None,
+        recycle_drain_timeout: float | None = None,
     ):
         self._playwright = None
         self._browser = None
@@ -84,6 +90,13 @@ class OptimizedPlaywrightManager:
                 os.environ.get("BROWSER_RECYCLE_EVERY", DEFAULT_RECYCLE_EVERY)
             )
         self._recycle_every = max(1, recycle_every)
+        if recycle_drain_timeout is None:
+            recycle_drain_timeout = float(
+                os.environ.get(
+                    "BROWSER_RECYCLE_DRAIN_TIMEOUT", DEFAULT_RECYCLE_DRAIN_TIMEOUT
+                )
+            )
+        self._recycle_drain_timeout = max(0.0, float(recycle_drain_timeout))
         self._total_requests = 0
         self._requests_since_recycle = 0
         self._browser_generations = 0
@@ -177,10 +190,22 @@ class OptimizedPlaywrightManager:
 
         try:
             # Wait for in-flight scrapes to finish (they still hold contexts).
+            # A hung page never reaches zero. After the drain timeout, close
+            # Chromium anyway so new scrapes are not stuck behind this recycle.
+            deadline = time.monotonic() + self._recycle_drain_timeout
             while True:
                 async with self._state_lock:
                     inflight = self._concurrent_operations
                 if inflight <= 0:
+                    break
+                if time.monotonic() >= deadline:
+                    logger.warning(
+                        "Playwright recycle (%s) proceeding with %d in-flight "
+                        "scrape(s) still running after %.0fs",
+                        reason,
+                        inflight,
+                        self._recycle_drain_timeout,
+                    )
                     break
                 await asyncio.sleep(0.05)
 
@@ -236,26 +261,28 @@ class OptimizedPlaywrightManager:
         inflight waits for recycle). New work is gated in
         ``execute_with_semaphore`` / ``new_context_page`` instead.
         """
-        async with self._context_lock:
-            if self._browser is None:
-                await self._launch_browser()
+        while True:
+            async with self._context_lock:
+                if self._browser is None:
+                    await self._launch_browser()
 
-            if self._context_pool:
-                context = self._context_pool.pop()
-                self._context_in_use.append(context)
-                self._contexts_reused += 1
-                return context
+                if self._context_pool:
+                    context = self._context_pool.pop()
+                    self._context_in_use.append(context)
+                    self._contexts_reused += 1
+                    return context
 
-            # Create new context if pool is empty and under limit
-            if len(self._context_in_use) < self._max_contexts:
-                context = await self._browser.new_context(**build_fingerprint())
-                self._context_in_use.append(context)
-                self._contexts_created += 1
-                return context
+                # Create new context if pool is empty and under limit
+                if len(self._context_in_use) < self._max_contexts:
+                    context = await self._browser.new_context(**build_fingerprint())
+                    self._context_in_use.append(context)
+                    self._contexts_created += 1
+                    return context
 
-            # If we're at the limit, wait and try again
+            # Pool is exhausted. Sleep outside the lock: asyncio.Lock is not
+            # reentrant, and waiting while holding it deadlocks release_context
+            # and recycle (both need this same lock).
             await asyncio.sleep(0.1)
-            return await self.get_context()
 
     async def release_context(self, context: BrowserContext):
         """Return a context to the pool for reuse"""

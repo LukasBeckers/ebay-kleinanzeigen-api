@@ -184,6 +184,106 @@ def test_in_flight_get_context_does_not_deadlock_during_recycle():
     asyncio.run(_run())
 
 
+def test_get_context_does_not_deadlock_when_pool_is_full():
+    """Waiting for a free context must not hold the context lock.
+
+    asyncio.Lock is not reentrant. The old retry called get_context again
+    while still holding the lock, so release_context and recycle never ran.
+    """
+
+    async def _run():
+        mgr = OptimizedPlaywrightManager(
+            max_contexts=1, max_concurrent=2, recycle_every=100
+        )
+        fake_browser = MagicMock()
+
+        def _new_context(**_kwargs):
+            ctx = MagicMock(pages=[], browser=fake_browser)
+            ctx.close = AsyncMock()
+            return ctx
+
+        fake_browser.new_context = AsyncMock(side_effect=_new_context)
+        fake_browser.close = AsyncMock()
+        fake_pw = MagicMock()
+        fake_pw.chromium.launch = AsyncMock(return_value=fake_browser)
+        fake_pw.stop = AsyncMock()
+
+        with patch("utils.browser.async_playwright") as ap:
+            start_cm = AsyncMock()
+            start_cm.start = AsyncMock(return_value=fake_pw)
+            ap.return_value = start_cm
+
+            await mgr.start()
+            first = await mgr.get_context()
+            waiter = asyncio.create_task(mgr.get_context())
+            await asyncio.sleep(0.05)
+            assert not waiter.done()
+
+            await asyncio.wait_for(mgr.release_context(first), timeout=1.0)
+            second = await asyncio.wait_for(waiter, timeout=1.0)
+            assert second is not None
+            await mgr.close()
+
+    asyncio.run(_run())
+
+
+def test_recycle_proceeds_when_inflight_never_finishes():
+    """A scrape that never returns must not pin the recycle flag forever."""
+
+    async def _run():
+        mgr = OptimizedPlaywrightManager(
+            max_contexts=2,
+            max_concurrent=2,
+            recycle_every=1,
+            recycle_drain_timeout=0.05,
+        )
+        fake_browser = MagicMock()
+        fake_browser.new_context = AsyncMock(
+            return_value=MagicMock(pages=[], browser=fake_browser)
+        )
+        fake_browser.close = AsyncMock()
+        fake_pw = MagicMock()
+        fake_pw.chromium.launch = AsyncMock(return_value=fake_browser)
+        fake_pw.stop = AsyncMock()
+
+        with patch("utils.browser.async_playwright") as ap:
+            start_cm = AsyncMock()
+            start_cm.start = AsyncMock(return_value=fake_pw)
+            ap.return_value = start_cm
+
+            await mgr.start()
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def hang():
+                started.set()
+                await release.wait()
+                return "stuck"
+
+            hung = asyncio.create_task(mgr.execute_with_semaphore(hang()))
+            await started.wait()
+
+            async def noop():
+                return "ok"
+
+            assert (
+                await asyncio.wait_for(mgr.execute_with_semaphore(noop()), timeout=2.0)
+                == "ok"
+            )
+            assert mgr._recycle_count == 1
+            assert mgr._recycling is False
+            assert (
+                await asyncio.wait_for(mgr.execute_with_semaphore(noop()), timeout=2.0)
+                == "ok"
+            )
+
+            release.set()
+            assert await asyncio.wait_for(hung, timeout=1.0) == "stuck"
+            await mgr.close()
+
+    asyncio.run(_run())
+
+
 def test_set_recycle_every_changes_threshold_at_runtime():
     async def _run():
         mgr = OptimizedPlaywrightManager(
