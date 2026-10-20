@@ -64,8 +64,11 @@ The API will be available at `http://localhost:8000`
 
 The shared Playwright Chromium is **fully restarted every 10 000 scrape
 operations** (each `execute_with_semaphore` completion counts as one), even
-when the worker is busy. In-flight scrapes finish on the old browser; new
-requests wait until the restart completes. They are not cancelled. This
+when the worker is busy. In-flight scrapes normally finish on the old browser;
+new requests wait until the restart completes. They are not cancelled. If a
+scrape is still running after `BROWSER_RECYCLE_DRAIN_TIMEOUT` seconds
+(default 180), recycle closes Chromium anyway. A hung navigation used to
+block that wait forever, which then blocked every new scrape. This restart
 avoids hung `Page.goto` timeouts and empty search pages that build up when
 the same browser process runs for weeks under continuous load.
 
@@ -98,9 +101,21 @@ A Kleinanzeigen **HTTP 403** or the “IP-Bereich gesperrt” page is a **hard
 failure**: `/inserate` returns **403**, not 200 with an empty list. The
 proxy load balancer records that as a failed attempt.
 
-A search that loaded `#srchrslt-adtable` but has **no cards** (nothing
-matches the query) still returns **HTTP 200** with `success: true` and
-`results: []`.
+A search that loaded `#srchrslt-adtable` but has **no cards**, or the modern
+zero-result page `#saved-search-empty-result`, still returns **HTTP 200**
+with `success: true` and `results: []`. The ready check does not use
+`#srchrslt-results`: that node is in the shell HTML before cards hydrate.
+Extraction stays scoped to `#srchrslt-adtable`.
+
+Keyword searches with no category must use the all-categories suffix `/k0`,
+the same path shape as a category search:
+
+`/s-/preis:MIN:MAX/seite:{page}/k0?keywords=…&locationStr=…&radius=…`
+
+The older `/preis:…/s-seite:{page}?keywords=…` path no longer renders
+`#srchrslt-adtable` (the ads are only in a JSON blob). After the empty-page
+ready check, that document is reported as a successful search with zero
+cards. `tests/test_url_builder.py` locks the `/k0` form.
 
 ### Browser fingerprint
 
@@ -136,7 +151,7 @@ uv run uvicorn main:app --reload
 
 ### Installation using Docker
 
-1. Build the Docker image
+1. Build the Docker image. The build context skips `.venv` and git metadata (see `.dockerignore`).
 
 ```sh
 docker build -t ebay-kleinanzeigen-api .
