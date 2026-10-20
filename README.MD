@@ -107,6 +107,16 @@ with `success: true` and `results: []`. The ready check does not use
 `#srchrslt-results`: that node is in the shell HTML before cards hydrate.
 Extraction stays scoped to `#srchrslt-adtable`.
 
+Keyword searches with no category must use the all-categories suffix `/k0`,
+the same path shape as a category search:
+
+`/s-/preis:MIN:MAX/seite:{page}/k0?keywords=…&locationStr=…&radius=…`
+
+The older `/preis:…/s-seite:{page}?keywords=…` path no longer renders
+`#srchrslt-adtable` (the ads are only in a JSON blob). After the empty-page
+ready check, that document is reported as a successful search with zero
+cards. `tests/test_url_builder.py` locks the `/k0` form.
+
 ### Browser fingerprint
 
 Every Playwright context is created with one internally consistent identity

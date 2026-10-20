@@ -71,8 +71,9 @@ def build_search_url_template(
 
     Two URL shapes, matching what kleinanzeigen.de actually serves today:
 
-    * **No category** — the category-free "search" path:
-      ``/preis:MIN:MAX/s-seite:{page}?keywords=&locationStr=&radius=&sortingField=...``
+    * **No category** — same shape as a category URL, with Kleinanzeigen's
+      all-categories suffix ``k0`` instead of ``c<id>``:
+      ``/s-/preis:MIN:MAX/seite:{page}/k0?keywords=&locationStr=&radius=&sortingField=...``
     * **With category** — slug + price + seite + ``cNNN`` suffix.
       Kleinanzeigen requires a slug segment before ``/c<id>``; any non-empty
       slug resolves via the ``cNNN`` id, so we use ``/s-`` as a placeholder.
@@ -81,7 +82,11 @@ def build_search_url_template(
       ``/s-/preis:MIN:MAX/seite:{page}/c<id>?locationStr=&radius=&keywords=&sortingField=...``
 
     The previous format ``/cNNN/s-seite:{page}?…`` silently dropped the category
-    (returned a generic location feed). That's the bug this function fixes.
+    (returned a generic location feed). The category-free form
+    ``/preis:…/s-seite:{page}?keywords=…`` no longer renders ``#srchrslt-adtable``
+    (listings sit in a JSON blob only). The empty-page ready check then treats
+    that document as a successful search with zero cards. ``/k0`` is the page
+    that still contains ``article[data-adid]``.
 
     Sort is applied via the ``sortingField`` **query parameter** (verified by
     inspecting the site's own dropdown markup; the path-slug ``/sortierung:``
@@ -108,7 +113,8 @@ def build_search_url_template(
     if cat:
         path = f"/s-{price}/seite:{{page}}/c{cat}{attr_suffix}"
     else:
-        path = f"{price}/s-seite:{{page}}"
+        # ``k0`` is "every category". ``/s-seite:`` is a dead path: no ad table.
+        path = f"/s-{price}/seite:{{page}}/k0"
 
     params: dict[str, str] = {}
     if query:

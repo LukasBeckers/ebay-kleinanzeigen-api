@@ -1,9 +1,9 @@
 import asyncio
 import time
 import random
-from urllib.parse import urlencode
-
 from fastapi import HTTPException
+
+from scrapers.url_builder import build_search_url_template
 
 from utils.browser import PlaywrightManager, OptimizedPlaywrightManager
 from utils.performance import PageMetrics, track_page_performance
@@ -210,31 +210,13 @@ async def get_inserate_klaz(
     max_price: int = None,
     page_count: int = 1,
 ):
-    base_url = "https://www.kleinanzeigen.de"
-
-    # Build the price filter part of the path
-    price_path = ""
-    if min_price is not None or max_price is not None:
-        # Convert prices to strings; if one is None, leave its place empty
-        min_price_str = str(min_price) if min_price is not None else ""
-        max_price_str = str(max_price) if max_price is not None else ""
-        price_path = f"/preis:{min_price_str}:{max_price_str}"
-
-    # Build the search path with price and page information
-    search_path = f"{price_path}/s-seite"
-    search_path += ":{page}"
-
-    # Build query parameters as before
-    params = {}
-    if query:
-        params["keywords"] = query
-    if location:
-        params["locationStr"] = location
-    if radius:
-        params["radius"] = radius
-
-    # Construct the full URL and get it
-    search_url = base_url + search_path + ("?" + urlencode(params) if params else "")
+    search_url = build_search_url_template(
+        query=query,
+        location=location,
+        radius=radius,
+        min_price=min_price,
+        max_price=max_price,
+    )
 
     tasks = []
     for i in range(1, page_count + 1):
@@ -285,32 +267,12 @@ async def get_inserate_klaz_optimized(
     with error_handling_context(
         operation="multi_page_scrape", logger=logger
     ) as error_ctx:
-        base_url = "https://www.kleinanzeigen.de"
-
-        # Build the price filter part of the path
-        price_path = ""
-        if min_price is not None or max_price is not None:
-            # Convert prices to strings; if one is None, leave its place empty
-            min_price_str = str(min_price) if min_price is not None else ""
-            max_price_str = str(max_price) if max_price is not None else ""
-            price_path = f"/preis:{min_price_str}:{max_price_str}"
-
-        # Build the search path with price and page information
-        search_path = f"{price_path}/s-seite"
-        search_path += ":{page}"
-
-        # Build query parameters as before
-        params = {}
-        if query:
-            params["keywords"] = query
-        if location:
-            params["locationStr"] = location
-        if radius:
-            params["radius"] = radius
-
-        # Construct the full URL and get it
-        search_url = (
-            base_url + search_path + ("?" + urlencode(params) if params else "")
+        search_url = build_search_url_template(
+            query=query,
+            location=location,
+            radius=radius,
+            min_price=min_price,
+            max_price=max_price,
         )
 
         # Create tasks for concurrent processing
