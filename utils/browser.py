@@ -81,8 +81,14 @@ class OptimizedPlaywrightManager:
         self._browser = None
         self._context_pool: List[BrowserContext] = []
         self._context_in_use: List[BrowserContext] = []
+        if max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1")
+        # Configured limit, not the live free-slot count. Callers must copy
+        # this. Semaphore._value drops to 0 while scrapes are in flight, and a
+        # new Semaphore(0) waits forever.
+        self.max_concurrent = int(max_concurrent)
         self._max_contexts = max_contexts
-        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._semaphore = asyncio.Semaphore(self.max_concurrent)
         self._context_lock = asyncio.Lock()
 
         if recycle_every is None:
@@ -370,6 +376,7 @@ class OptimizedPlaywrightManager:
             "contexts_in_pool": len(self._context_pool),
             "contexts_in_use": len(self._context_in_use),
             "max_contexts": self._max_contexts,
+            "max_concurrent": self.max_concurrent,
             "max_concurrent_reached": self._max_concurrent_reached,
             "current_concurrent": self._concurrent_operations,
             "reuse_ratio": self._contexts_reused / max(self._contexts_created, 1),

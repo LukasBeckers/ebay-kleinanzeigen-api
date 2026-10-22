@@ -78,8 +78,25 @@ Override the interval with env:
 BROWSER_RECYCLE_EVERY=10000
 ```
 
-`GET /` reports `browser.total_requests`, `requests_since_recycle`,
-`browser_generations`, and `recycle_count` for ops checks. Every response
+### Search concurrency
+
+Each scraper process runs this many browser searches at once
+(`BROWSER_MAX_CONCURRENT`, default **6**, previously 3). The context pool
+grows with that limit and is at least 20. The same process on the remote
+worker uses this default too.
+
+The task scheduler copies this configured limit. It does not read how many
+browser slots are free. A busy browser reports 0 free slots, and a scheduler
+built from 0 waits forever, so the HTTP request never answers and the proxy
+records a 300s timeout.
+
+```sh
+BROWSER_MAX_CONCURRENT=6
+```
+
+`GET /` reports `browser.max_concurrent`, `browser.total_requests`,
+`requests_since_recycle`, `browser_generations`, and `recycle_count` for ops
+checks. Every response
 also carries `X-Recycle-Every`, `X-Requests-Since-Recycle`, and
 `X-Recycle-Count` so the proxy admin UI can show live recycle state.
 
@@ -337,7 +354,7 @@ Performance tests conducted on **Arch Linux** with **Intel i7-1260P** processor:
 - **Context Pooling**: Efficient browser resource reuse
 - **Dual-layout search scraping**: Supports legacy ``li.ad-listitem`` cards and Kleinanzeigen's modern ``li[data-clickable="card"]`` Tailwind layout (the latter is served on repeat visits in the same browser context)
 - **Memory Optimization**: Automatic garbage collection and efficient processing
-- **Intelligent Concurrency**: Search scrapes share the global Playwright semaphore (`max_concurrent=3`) to limit parallel Chromium tabs
+- **Intelligent Concurrency**: Search scrapes share the global Playwright semaphore (`BROWSER_MAX_CONCURRENT`, default 6) to limit parallel Chromium tabs
 
 ### 🔧 Production Ready
 

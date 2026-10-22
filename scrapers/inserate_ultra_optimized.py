@@ -68,11 +68,13 @@ class UltraOptimizedScraper:
 
     def __init__(self, browser_manager: OptimizedPlaywrightManager):
         self.browser_manager = browser_manager
-        self.task_manager = HighPerformanceTaskManager(
-            max_concurrent=browser_manager._semaphore._value
-        )
+        # Use the configured limit. The live semaphore value is the number of
+        # free slots and is 0 when the browser is busy, which makes the task
+        # manager wait forever.
+        limit = browser_manager.max_concurrent
+        self.task_manager = HighPerformanceTaskManager(max_concurrent=limit)
         self.memory_processor = MemoryOptimizedProcessor(
-            max_concurrent=browser_manager._semaphore._value,
+            max_concurrent=limit,
             gc_threshold=50,  # More frequent GC for memory efficiency
         )
 
