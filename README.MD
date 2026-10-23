@@ -52,6 +52,8 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
+`requirements.txt` is compiled from `pyproject.toml`. The pinned releases are past the disclosed advisory floors, including aiohttp >= 3.14.4, starlette >= 1.3.1, certifi >= 2026.10.19, and python-multipart >= 0.0.31.
+
 3. Start the API
 
 ```sh
