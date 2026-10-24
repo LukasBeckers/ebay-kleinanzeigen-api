@@ -324,6 +324,12 @@ class UltraOptimizedScraper:
 
                 # Process batch results
                 for result in batch_results:
+                    # An IP block is HTTP 403 from the page fetch. Swallowing
+                    # it here made /inserate return 200 with success false and
+                    # no error, so the proxy kept the worker in the pool and
+                    # Listing Hunter only saw "upstream search failed".
+                    if isinstance(result, HTTPException) and result.status_code == 403:
+                        raise result
                     if isinstance(result, Exception):
                         # Handle unexpected exceptions
                         logger.log_error(

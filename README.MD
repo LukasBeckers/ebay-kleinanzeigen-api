@@ -117,8 +117,9 @@ completed scrape starts a recycle.
 ### IP block vs empty search
 
 A Kleinanzeigen **HTTP 403** or the “IP-Bereich gesperrt” page is a **hard
-failure**: `/inserate` returns **403**, not 200 with an empty list. The
-proxy load balancer records that as a failed attempt.
+failure**: `/inserate` returns **403**, not 200 with an empty list. The page
+batch re-raises that 403 instead of dropping the page and answering
+`success: false`. The proxy load balancer records that as a failed attempt.
 
 A search that loaded `#srchrslt-adtable` but has **no cards**, or the modern
 zero-result page `#saved-search-empty-result`, still returns **HTTP 200**
