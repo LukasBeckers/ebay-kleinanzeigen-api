@@ -3,7 +3,7 @@ import time
 import random
 from fastapi import HTTPException
 
-from scrapers.url_builder import build_search_url_template
+from scrapers.url_builder import build_search_url_template, substitute_page
 
 from utils.browser import PlaywrightManager, OptimizedPlaywrightManager
 from utils.performance import PageMetrics, track_page_performance
@@ -220,7 +220,7 @@ async def get_inserate_klaz(
 
     tasks = []
     for i in range(1, page_count + 1):
-        url = search_url.format(page=i)
+        url = substitute_page(search_url, i)
         tasks.append(fetch_page(browser_manager, url))
 
     try:
@@ -278,7 +278,7 @@ async def get_inserate_klaz_optimized(
         # Create tasks for concurrent processing
         tasks = []
         for i in range(1, page_count + 1):
-            url = search_url.format(page=i)
+            url = substitute_page(search_url, i)
             tasks.append(optimized_fetch_page(browser_manager, url, i, logger=logger))
 
         # Set concurrent level for metrics
@@ -303,7 +303,7 @@ async def get_inserate_klaz_optimized(
                     error_context = ErrorContext(
                         operation="page_fetch_gather",
                         page_number=i + 1,
-                        url=search_url.format(page=i + 1),
+                        url=substitute_page(search_url, i + 1),
                     )
                     structured_error = ErrorClassifier.classify_exception(
                         result, error_context, "concurrent_page_fetch"
@@ -322,7 +322,7 @@ async def get_inserate_klaz_optimized(
                     # Create a failed page metric with enhanced information
                     failed_metric = PageMetrics(
                         page_number=i + 1,
-                        url=search_url.format(page=i + 1),
+                        url=substitute_page(search_url, i + 1),
                         start_time=time.time(),
                         end_time=time.time(),
                         success=False,

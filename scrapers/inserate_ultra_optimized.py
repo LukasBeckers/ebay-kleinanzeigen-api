@@ -11,7 +11,7 @@ import random
 import gc
 from typing import List, Dict, Any, Tuple
 
-from scrapers.url_builder import build_search_url_template
+from scrapers.url_builder import build_search_url_template, substitute_page
 from scrapers.search_listings import (
     EXTRACT_ARTICLE_JS,
     SEARCH_PAGE_READY_SELECTOR,
@@ -300,7 +300,7 @@ class UltraOptimizedScraper:
 
             # Create page fetch tasks
             async def create_page_task(page_num: int):
-                url = search_url.format(page=page_num)
+                url = substitute_page(search_url, page_num)
                 return await self.ultra_optimized_fetch_page(url, page_num)
 
             # Use memory-optimized batch processing

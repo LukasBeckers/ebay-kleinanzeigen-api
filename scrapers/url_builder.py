@@ -131,6 +131,23 @@ def build_search_url_template(
     return f"{BASE_URL}{path}{qs}"
 
 
+_PAGE_PLACEHOLDER = "{page}"
+
+
+def substitute_page(template: str, page: int) -> str:
+    """Fill the single ``{page}`` slot without interpreting other braces.
+
+    Category ids and attribute filters are copied into the same string.
+    ``str.format`` would treat braces in those values as fields and read
+    attributes off the page number.
+    """
+    if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+        raise ValueError("page must be a positive integer")
+    if template.count(_PAGE_PLACEHOLDER) != 1:
+        raise ValueError("search url must contain exactly one page placeholder")
+    return template.replace(_PAGE_PLACEHOLDER, str(page), 1)
+
+
 def build_search_url(page: int, **kwargs) -> str:
     """Convenience: build a concrete URL for a specific page number."""
-    return build_search_url_template(**kwargs).format(page=page)
+    return substitute_page(build_search_url_template(**kwargs), page)

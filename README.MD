@@ -134,7 +134,7 @@ the same path shape as a category search:
 The older `/preis:…/s-seite:{page}?keywords=…` path no longer renders
 `#srchrslt-adtable` (the ads are only in a JSON blob). After the empty-page
 ready check, that document is reported as a successful search with zero
-cards. `tests/test_url_builder.py` locks the `/k0` form.
+cards. `tests/test_url_builder.py` locks the `/k0` form. The `{page}` slot is filled by replacement. Category ids and attribute filters are not passed through `str.format`, so braces in those values stay literal.
 
 ### Browser fingerprint
 

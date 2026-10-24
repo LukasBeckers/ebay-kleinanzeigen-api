@@ -4,7 +4,7 @@ Written from the *contract* side — we assert URLs that kleinanzeigen.de
 actually serves correctly for each combination.  Verified by live fetching
 during the bug-hunt session; see tests/fixtures/ for snapshots.
 """
-from scrapers.url_builder import build_search_url, build_search_url_template
+from scrapers.url_builder import build_search_url, build_search_url_template, substitute_page
 
 
 class TestNoCategory:
@@ -123,13 +123,30 @@ class TestPagination:
 
     def test_page_substitution(self):
         tpl = build_search_url_template(query="mofa")
-        assert tpl.format(page=5) == "https://www.kleinanzeigen.de/s-/seite:5/k0?keywords=mofa"
+        assert substitute_page(tpl, 5) == "https://www.kleinanzeigen.de/s-/seite:5/k0?keywords=mofa"
 
     def test_page_substitution_with_category(self):
         tpl = build_search_url_template(category="305", location="52538", radius=100)
-        assert tpl.format(page=7) == (
+        assert substitute_page(tpl, 7) == (
             "https://www.kleinanzeigen.de/s-/seite:7/c305?locationStr=52538&radius=100"
         )
+
+    def test_braces_in_filters_are_not_format_fields(self):
+        marker = "{page.__class__.__name__}"
+        url = build_search_url(
+            page=4,
+            category="305",
+            attribute_filters={"km": marker},
+        )
+        assert marker in url
+        assert "/seite:4/" in url
+        assert "/cint" not in url
+
+    def test_an_extra_page_placeholder_is_rejected(self):
+        import pytest as _pt
+
+        with _pt.raises(ValueError, match="exactly one page placeholder"):
+            build_search_url(page=4, category="{page}")
 
 
 class TestSort:
@@ -273,3 +290,12 @@ class TestDefaultSnapshot:
     def test_sort_none_byte_identical(self):
         for kwargs, expected in self.SNAPSHOTS:
             assert build_search_url(page=1, sort=None, **kwargs) == expected
+
+
+def test_scraper_page_slots_are_not_filled_with_str_format():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "scrapers"
+    for path in root.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert ".format(page" not in text, path.name
