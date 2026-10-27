@@ -52,6 +52,8 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
+`requirements.txt` is compiled from `pyproject.toml`. The pinned releases are past the disclosed advisory floors, including aiohttp >= 3.14.4, starlette >= 1.3.1, certifi >= 2026.10.19, and python-multipart >= 0.0.31.
+
 3. Start the API
 
 ```sh
@@ -64,8 +66,11 @@ The API will be available at `http://localhost:8000`
 
 The shared Playwright Chromium is **fully restarted every 10 000 scrape
 operations** (each `execute_with_semaphore` completion counts as one), even
-when the worker is busy. In-flight scrapes finish on the old browser; new
-requests wait until the restart completes. They are not cancelled. This
+when the worker is busy. In-flight scrapes normally finish on the old browser;
+new requests wait until the restart completes. They are not cancelled. If a
+scrape is still running after `BROWSER_RECYCLE_DRAIN_TIMEOUT` seconds
+(default 180), recycle closes Chromium anyway. A hung navigation used to
+block that wait forever, which then blocked every new scrape. This restart
 avoids hung `Page.goto` timeouts and empty search pages that build up when
 the same browser process runs for weeks under continuous load.
 
@@ -75,8 +80,25 @@ Override the interval with env:
 BROWSER_RECYCLE_EVERY=10000
 ```
 
-`GET /` reports `browser.total_requests`, `requests_since_recycle`,
-`browser_generations`, and `recycle_count` for ops checks. Every response
+### Search concurrency
+
+Each scraper process runs this many browser searches at once
+(`BROWSER_MAX_CONCURRENT`, default **6**, previously 3). The context pool
+grows with that limit and is at least 20. The same process on the remote
+worker uses this default too.
+
+The task scheduler copies this configured limit. It does not read how many
+browser slots are free. A busy browser reports 0 free slots, and a scheduler
+built from 0 waits forever, so the HTTP request never answers and the proxy
+records a 300s timeout.
+
+```sh
+BROWSER_MAX_CONCURRENT=6
+```
+
+`GET /` reports `browser.max_concurrent`, `browser.total_requests`,
+`requests_since_recycle`, `browser_generations`, and `recycle_count` for ops
+checks. Every response
 also carries `X-Recycle-Every`, `X-Requests-Since-Recycle`, and
 `X-Recycle-Count` so the proxy admin UI can show live recycle state.
 
@@ -95,12 +117,25 @@ completed scrape starts a recycle.
 ### IP block vs empty search
 
 A Kleinanzeigen **HTTP 403** or the “IP-Bereich gesperrt” page is a **hard
-failure**: `/inserate` returns **403**, not 200 with an empty list. The
-proxy load balancer records that as a failed attempt.
+failure**: `/inserate` returns **403**, not 200 with an empty list. The page
+batch re-raises that 403 instead of dropping the page and answering
+`success: false`. The proxy load balancer records that as a failed attempt.
 
-A search that loaded `#srchrslt-adtable` but has **no cards** (nothing
-matches the query) still returns **HTTP 200** with `success: true` and
-`results: []`.
+A search that loaded `#srchrslt-adtable` but has **no cards**, or the modern
+zero-result page `#saved-search-empty-result`, still returns **HTTP 200**
+with `success: true` and `results: []`. The ready check does not use
+`#srchrslt-results`: that node is in the shell HTML before cards hydrate.
+Extraction stays scoped to `#srchrslt-adtable`.
+
+Keyword searches with no category must use the all-categories suffix `/k0`,
+the same path shape as a category search:
+
+`/s-/preis:MIN:MAX/seite:{page}/k0?keywords=…&locationStr=…&radius=…`
+
+The older `/preis:…/s-seite:{page}?keywords=…` path no longer renders
+`#srchrslt-adtable` (the ads are only in a JSON blob). After the empty-page
+ready check, that document is reported as a successful search with zero
+cards. `tests/test_url_builder.py` locks the `/k0` form. The `{page}` slot is filled by replacement. Category ids and attribute filters are not passed through `str.format`, so braces in those values stay literal.
 
 ### Browser fingerprint
 
@@ -136,7 +171,7 @@ uv run uvicorn main:app --reload
 
 ### Installation using Docker
 
-1. Build the Docker image
+1. Build the Docker image. The build context skips `.venv` and git metadata (see `.dockerignore`).
 
 ```sh
 docker build -t ebay-kleinanzeigen-api .
@@ -322,7 +357,7 @@ Performance tests conducted on **Arch Linux** with **Intel i7-1260P** processor:
 - **Context Pooling**: Efficient browser resource reuse
 - **Dual-layout search scraping**: Supports legacy ``li.ad-listitem`` cards and Kleinanzeigen's modern ``li[data-clickable="card"]`` Tailwind layout (the latter is served on repeat visits in the same browser context)
 - **Memory Optimization**: Automatic garbage collection and efficient processing
-- **Intelligent Concurrency**: Search scrapes share the global Playwright semaphore (`max_concurrent=3`) to limit parallel Chromium tabs
+- **Intelligent Concurrency**: Search scrapes share the global Playwright semaphore (`BROWSER_MAX_CONCURRENT`, default 6) to limit parallel Chromium tabs
 
 ### 🔧 Production Ready
 

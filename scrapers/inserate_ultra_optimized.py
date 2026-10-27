@@ -11,7 +11,7 @@ import random
 import gc
 from typing import List, Dict, Any, Tuple
 
-from scrapers.url_builder import build_search_url_template
+from scrapers.url_builder import build_search_url_template, substitute_page
 from scrapers.search_listings import (
     EXTRACT_ARTICLE_JS,
     SEARCH_PAGE_READY_SELECTOR,
@@ -68,11 +68,13 @@ class UltraOptimizedScraper:
 
     def __init__(self, browser_manager: OptimizedPlaywrightManager):
         self.browser_manager = browser_manager
-        self.task_manager = HighPerformanceTaskManager(
-            max_concurrent=browser_manager._semaphore._value
-        )
+        # Use the configured limit. The live semaphore value is the number of
+        # free slots and is 0 when the browser is busy, which makes the task
+        # manager wait forever.
+        limit = browser_manager.max_concurrent
+        self.task_manager = HighPerformanceTaskManager(max_concurrent=limit)
         self.memory_processor = MemoryOptimizedProcessor(
-            max_concurrent=browser_manager._semaphore._value,
+            max_concurrent=limit,
             gc_threshold=50,  # More frequent GC for memory efficiency
         )
 
@@ -298,7 +300,7 @@ class UltraOptimizedScraper:
 
             # Create page fetch tasks
             async def create_page_task(page_num: int):
-                url = search_url.format(page=page_num)
+                url = substitute_page(search_url, page_num)
                 return await self.ultra_optimized_fetch_page(url, page_num)
 
             # Use memory-optimized batch processing
@@ -322,6 +324,12 @@ class UltraOptimizedScraper:
 
                 # Process batch results
                 for result in batch_results:
+                    # An IP block is HTTP 403 from the page fetch. Swallowing
+                    # it here made /inserate return 200 with success false and
+                    # no error, so the proxy kept the worker in the pool and
+                    # Listing Hunter only saw "upstream search failed".
+                    if isinstance(result, HTTPException) and result.status_code == 403:
+                        raise result
                     if isinstance(result, Exception):
                         # Handle unexpected exceptions
                         logger.log_error(

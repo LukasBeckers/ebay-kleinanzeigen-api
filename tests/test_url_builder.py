@@ -4,28 +4,50 @@ Written from the *contract* side — we assert URLs that kleinanzeigen.de
 actually serves correctly for each combination.  Verified by live fetching
 during the bug-hunt session; see tests/fixtures/ for snapshots.
 """
-from scrapers.url_builder import build_search_url, build_search_url_template
+from scrapers.url_builder import build_search_url, build_search_url_template, substitute_page
 
 
 class TestNoCategory:
-    """When no category is given, fall back to Kleinanzeigen's keyword-search format."""
+    """Keyword searches use ``/k0`` (all categories), same path shape as ``/c<id>``.
+
+    ``/preis:…/s-seite:N?keywords=…`` no longer renders ``#srchrslt-adtable``.
+    The empty-page ready check then reports a successful search with zero cards.
+    Live check on 2026-10-20: Stihl near 52538 on ``/k0`` had 26 ``article[data-adid]``;
+    the ``/s-seite:`` URL had none.
+    """
 
     def test_keyword_only(self):
         url = build_search_url(page=1, query="mofa")
-        assert url == "https://www.kleinanzeigen.de/s-seite:1?keywords=mofa"
+        assert url == "https://www.kleinanzeigen.de/s-/seite:1/k0?keywords=mofa"
 
     def test_keyword_with_location(self):
         url = build_search_url(page=1, query="mofa", location="52538", radius=100)
         assert url == (
-            "https://www.kleinanzeigen.de/s-seite:1"
+            "https://www.kleinanzeigen.de/s-/seite:1/k0"
             "?keywords=mofa&locationStr=52538&radius=100"
         )
 
     def test_price_range(self):
         url = build_search_url(page=2, query="mofa", min_price=0, max_price=300)
         assert url == (
-            "https://www.kleinanzeigen.de/preis:0:300/s-seite:2?keywords=mofa"
+            "https://www.kleinanzeigen.de/s-/preis:0:300/seite:2/k0?keywords=mofa"
         )
+
+    def test_keyword_url_is_not_the_legacy_s_seite_path(self):
+        url = build_search_url(
+            page=1,
+            query="Stihl",
+            location="52538",
+            radius=150,
+            min_price=10,
+            max_price=200,
+        )
+        assert url == (
+            "https://www.kleinanzeigen.de/s-/preis:10:200/seite:1/k0"
+            "?keywords=Stihl&locationStr=52538&radius=150"
+        )
+        assert "/s-seite:" not in url
+        assert url.split("?")[0].endswith("/k0")
 
     def test_open_ended_min(self):
         url = build_search_url(page=1, query="x", max_price=100)
@@ -101,13 +123,30 @@ class TestPagination:
 
     def test_page_substitution(self):
         tpl = build_search_url_template(query="mofa")
-        assert tpl.format(page=5) == "https://www.kleinanzeigen.de/s-seite:5?keywords=mofa"
+        assert substitute_page(tpl, 5) == "https://www.kleinanzeigen.de/s-/seite:5/k0?keywords=mofa"
 
     def test_page_substitution_with_category(self):
         tpl = build_search_url_template(category="305", location="52538", radius=100)
-        assert tpl.format(page=7) == (
+        assert substitute_page(tpl, 7) == (
             "https://www.kleinanzeigen.de/s-/seite:7/c305?locationStr=52538&radius=100"
         )
+
+    def test_braces_in_filters_are_not_format_fields(self):
+        marker = "{page.__class__.__name__}"
+        url = build_search_url(
+            page=4,
+            category="305",
+            attribute_filters={"km": marker},
+        )
+        assert marker in url
+        assert "/seite:4/" in url
+        assert "/cint" not in url
+
+    def test_an_extra_page_placeholder_is_rejected(self):
+        import pytest as _pt
+
+        with _pt.raises(ValueError, match="exactly one page placeholder"):
+            build_search_url(page=4, category="{page}")
 
 
 class TestSort:
@@ -130,7 +169,7 @@ class TestSort:
         # Sort travels as a query parameter (path-slug form is silently ignored).
         assert "sortingField=PRICE_AMOUNT" in url
         # And the path itself remains the standard newest-first shape.
-        assert "/preis:0:300/s-seite:1" in url
+        assert "/s-/preis:0:300/seite:1/k0" in url
 
     def test_price_desc_with_category(self):
         url = build_search_url(page=2, category="305", location="52538", radius=100, sort="price_desc")
@@ -233,10 +272,10 @@ class TestDefaultSnapshot:
 
     SNAPSHOTS = [
         # (kwargs, expected URL for page 1)
-        (dict(query="mofa"), "https://www.kleinanzeigen.de/s-seite:1?keywords=mofa"),
+        (dict(query="mofa"), "https://www.kleinanzeigen.de/s-/seite:1/k0?keywords=mofa"),
         (
             dict(query="mofa", location="52538", radius=100),
-            "https://www.kleinanzeigen.de/s-seite:1?keywords=mofa&locationStr=52538&radius=100",
+            "https://www.kleinanzeigen.de/s-/seite:1/k0?keywords=mofa&locationStr=52538&radius=100",
         ),
         (
             dict(category="305", location="52538", radius=75, min_price=30, max_price=200),
@@ -251,3 +290,12 @@ class TestDefaultSnapshot:
     def test_sort_none_byte_identical(self):
         for kwargs, expected in self.SNAPSHOTS:
             assert build_search_url(page=1, sort=None, **kwargs) == expected
+
+
+def test_scraper_page_slots_are_not_filled_with_str_format():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "scrapers"
+    for path in root.glob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert ".format(page" not in text, path.name

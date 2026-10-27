@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -31,7 +32,22 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize shared browser manager with optimized settings.
     # Chromium is fully restarted every BROWSER_RECYCLE_EVERY scrape ops
     # (default 10_000) to avoid long-lived browser degradation.
-    browser_manager = OptimizedPlaywrightManager(max_contexts=20, max_concurrent=3)
+    # BROWSER_MAX_CONCURRENT is the configured scrape parallelism (default 6,
+    # was 3). It must stay a fixed limit: sizing new semaphores from the live
+    # free-slot count hangs requests while the browser is busy.
+    raw_concurrent = os.environ.get("BROWSER_MAX_CONCURRENT", "6")
+    try:
+        max_concurrent = int(raw_concurrent)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"BROWSER_MAX_CONCURRENT must be an integer (got {raw_concurrent!r})"
+        ) from exc
+    if max_concurrent < 1:
+        raise RuntimeError("BROWSER_MAX_CONCURRENT must be >= 1")
+    browser_manager = OptimizedPlaywrightManager(
+        max_contexts=max(20, max_concurrent),
+        max_concurrent=max_concurrent,
+    )
     await browser_manager.start()
 
     # Store browser manager in app state for access by routers
@@ -97,6 +113,7 @@ async def root():
         "status": "operational",
         "browser": {
             "recycle_every": metrics.get("recycle_every"),
+            "max_concurrent": metrics.get("max_concurrent"),
             "total_requests": metrics.get("total_requests"),
             "requests_since_recycle": metrics.get("requests_since_recycle"),
             "browser_generations": metrics.get("browser_generations"),

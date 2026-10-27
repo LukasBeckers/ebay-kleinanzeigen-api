@@ -5,9 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 SEARCH_ADTABLE_SELECTOR = "#srchrslt-adtable"
-# Wait for the results table itself so a genuine empty search (0 cards) is
-# distinguishable from a block page that never hydrates listings.
-SEARCH_PAGE_READY_SELECTOR = SEARCH_ADTABLE_SELECTOR
+# Modern zero-result pages omit the ad table and render this section instead.
+# Waiting only for the ad table treats that page as a hydration failure and
+# retries until the navigation budget is spent (~50s). `#srchrslt-results` is
+# in the shell HTML before cards hydrate, so it is not a ready signal.
+SEARCH_EMPTY_SELECTOR = "#saved-search-empty-result"
+SEARCH_PAGE_READY_SELECTOR = f"{SEARCH_ADTABLE_SELECTOR}, {SEARCH_EMPTY_SELECTOR}"
 SEARCH_HYDRATION_SELECTOR = f"{SEARCH_ADTABLE_SELECTOR} article[data-adid]"
 SEARCH_ARTICLE_SELECTOR = SEARCH_HYDRATION_SELECTOR
 
