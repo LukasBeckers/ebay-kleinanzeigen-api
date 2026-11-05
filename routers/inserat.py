@@ -1,4 +1,5 @@
 from scrapers.inserat import get_inserate_details_optimized
+from scrapers.url_builder import listing_detail_url
 from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter()
@@ -14,6 +15,10 @@ async def get_inserat(request: Request, id: str):
     """
     if not id or not id.strip():
         raise HTTPException(status_code=400, detail="Invalid listing ID")
+    try:
+        listing_detail_url(id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid listing ID") from exc
 
     browser_manager = request.app.state.browser_manager
     if not browser_manager:

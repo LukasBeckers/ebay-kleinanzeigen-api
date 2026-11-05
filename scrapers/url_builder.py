@@ -6,6 +6,11 @@ from urllib.parse import urlencode
 
 BASE_URL = "https://www.kleinanzeigen.de"
 
+# Characters that start a new path segment, a query, or a different URL.
+# Braces are allowed: a later check rejects an extra ``{page}`` slot, and
+# attribute values may contain them without being read as format fields.
+_STRUCTURAL = set("/\\?#%\x00@+ \t\r\n:")
+
 # Server-side sort options exposed by kleinanzeigen.de as query parameters.
 # Confirmed by inspecting the live site's ``<ul id="sortingField-selector-list">``
 # dropdown values.  ``None`` / ``"newest"`` is the site's default
@@ -36,6 +41,21 @@ def _sort_param(sort: str | None) -> str | None:
     return SORT_TOKENS[sort]
 
 
+def _path_token(value: str, label: str, *, allow_empty: bool = False) -> str:
+    """Keep one value inside a single Kleinanzeigen path token."""
+    if not isinstance(value, str) or (value == "" and not allow_empty):
+        raise ValueError(f"invalid {label}")
+    if value in {".", ".."} or ".." in value or any(ch in value for ch in _STRUCTURAL):
+        raise ValueError(f"invalid {label}")
+    return value
+
+
+def listing_detail_url(listing_id: str) -> str:
+    """Detail URL for one listing id. The id stays a single path segment."""
+    _path_token(listing_id, "listing id")
+    return f"{BASE_URL}/s-anzeige/{listing_id}"
+
+
 def _attribute_suffix(attribute_filters: dict[str, str] | None) -> str:
     """Encode category-specific filters as ``+key:value`` segments.
 
@@ -53,7 +73,12 @@ def _attribute_suffix(attribute_filters: dict[str, str] | None) -> str:
     """
     if not attribute_filters:
         return ""
-    return "".join(f"+{k}:{v}" for k, v in attribute_filters.items())
+    parts: list[str] = []
+    for key, value in attribute_filters.items():
+        safe_key = _path_token(key, "attribute filter")
+        safe_value = _path_token(value, "attribute filter", allow_empty=True)
+        parts.append(f"+{safe_key}:{safe_value}")
+    return "".join(parts)
 
 
 def build_search_url_template(
@@ -109,7 +134,12 @@ def build_search_url_template(
     price = _price_path(min_price, max_price)
     attr_suffix = _attribute_suffix(attribute_filters)
 
-    cat = category.lstrip("c") if category else ""
+    cat = ""
+    if category:
+        _path_token(category, "category")
+        cat = category.lstrip("c")
+        if cat:
+            _path_token(cat, "category")
     if cat:
         path = f"/s-{price}/seite:{{page}}/c{cat}{attr_suffix}"
     else:

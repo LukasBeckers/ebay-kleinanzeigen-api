@@ -4,6 +4,7 @@ import re
 import time
 from utils.browser import OptimizedPlaywrightManager
 from utils.performance import PageMetrics
+from scrapers.url_builder import listing_detail_url
 from utils.error_handling import (
     WarningManager,
     ErrorLogger,
@@ -140,7 +141,10 @@ async def get_inserate_details_optimized(
     tracker = PerformanceTracker()
     tracker.start_request()
 
-    url = f"https://www.kleinanzeigen.de/s-anzeige/{listing_id}"
+    try:
+        url = listing_detail_url(listing_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid listing id") from exc
 
     with error_handling_context(
         operation="fetch_listing_details", listing_id=listing_id, url=url, logger=logger
