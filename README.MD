@@ -217,7 +217,7 @@ GET /inserate?query=fahrrad&location=10178&radius=5&min_price=200&page_count=5
 
 ##### Path Parameters
 
-- **`id`** *(string)*: The unique identifier of the listing to fetch details for.
+- **`id`** *(string)*: The unique identifier of the listing to fetch details for. The id has to be one path segment. A slash, question mark, or parent segment is rejected. Search categories and attribute filters use the same rule, so they cannot change the request path.
 
 ##### Example Request
 

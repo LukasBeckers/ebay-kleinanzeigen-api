@@ -4,7 +4,12 @@ Written from the *contract* side — we assert URLs that kleinanzeigen.de
 actually serves correctly for each combination.  Verified by live fetching
 during the bug-hunt session; see tests/fixtures/ for snapshots.
 """
-from scrapers.url_builder import build_search_url, build_search_url_template, substitute_page
+from scrapers.url_builder import (
+    build_search_url,
+    build_search_url_template,
+    listing_detail_url,
+    substitute_page,
+)
 
 
 class TestNoCategory:
@@ -299,3 +304,51 @@ def test_scraper_page_slots_are_not_filled_with_str_format():
     for path in root.glob("*.py"):
         text = path.read_text(encoding="utf-8")
         assert ".format(page" not in text, path.name
+
+
+class TestPathConfinement:
+    """Category, attribute filters, and listing ids stay one path token."""
+
+    def test_slash_in_filter_value_is_rejected(self):
+        import pytest as _pt
+
+        with _pt.raises(ValueError, match="attribute filter"):
+            build_search_url(
+                page=1,
+                category="305",
+                attribute_filters={"motorraeder_roller.type_s": "moto/rad"},
+            )
+
+    def test_question_mark_in_filter_value_is_rejected(self):
+        import pytest as _pt
+
+        with _pt.raises(ValueError, match="attribute filter"):
+            build_search_url(
+                page=1,
+                category="305",
+                attribute_filters={"motorraeder_roller.km_i": "1?2"},
+            )
+
+    def test_slash_in_category_is_rejected(self):
+        import pytest as _pt
+
+        with _pt.raises(ValueError, match="category"):
+            build_search_url(page=1, category="305/1")
+
+    def test_parent_segment_in_listing_id_is_rejected(self):
+        import pytest as _pt
+
+        with _pt.raises(ValueError, match="listing id"):
+            listing_detail_url("..")
+
+    def test_slash_in_listing_id_is_rejected(self):
+        import pytest as _pt
+
+        with _pt.raises(ValueError, match="listing id"):
+            listing_detail_url("2674165671/extra")
+
+    def test_numeric_listing_id_stays_on_kleinanzeigen(self):
+        assert (
+            listing_detail_url("2674165671")
+            == "https://www.kleinanzeigen.de/s-anzeige/2674165671"
+        )
