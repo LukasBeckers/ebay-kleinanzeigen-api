@@ -216,7 +216,11 @@ class UltraOptimizedScraper:
                 except HTTPException:
                     raise
                 except IpBlockedError as e:
-                    raise HTTPException(status_code=403, detail=str(e)) from e
+                    # Keep the scrape URL and status in server logs only.
+                    logger.logger.warning("%s", e)
+                    raise HTTPException(
+                        status_code=403, detail="upstream blocked"
+                    ) from e
                 except Exception as e:
                     last_error = e
 
