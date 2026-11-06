@@ -97,5 +97,5 @@ async def get_seller_profile(
 
     raise HTTPException(
         status_code=500,
-        detail=f"Failed to fetch seller {user_id}: {last_error}",
-    )
+        detail="Failed to fetch seller",
+    ) from last_error

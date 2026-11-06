@@ -101,6 +101,10 @@ BROWSER_MAX_CONCURRENT=6
 checks. Every response
 also carries `X-Recycle-Every`, `X-Requests-Since-Recycle`, and
 `X-Recycle-Count` so the proxy admin UI can show live recycle state.
+Search JSON (`GET /inserate`) does **not** include `browser_metrics`; those
+pool and recycle counters stay off the public scrape body. IP-block responses
+use the fixed detail `upstream blocked`, and seller failures use
+`Failed to fetch seller`, so scrape URLs and exception text stay in server logs.
 
 Change the interval at runtime (does not rewrite env; restart reloads
 `BROWSER_RECYCLE_EVERY`):

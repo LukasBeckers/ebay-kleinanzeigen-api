@@ -80,6 +80,8 @@ async def get_inserate_ultra_optimized(
             del result["task_metrics"]
         if "optimization_features" in result:
             del result["optimization_features"]
+        # Pool sizes and recycle counters are ops telemetry, not search data.
+        result.pop("browser_metrics", None)
 
         # Simplify performance metrics
         if "performance_metrics" in result:
