@@ -102,3 +102,51 @@ async def test_seller_failure_detail_omits_exception_text():
     assert caught.value.detail == "Failed to fetch seller"
     assert "secret-path" not in str(caught.value.detail)
     assert "playwright" not in str(caught.value.detail).lower()
+
+
+@pytest.mark.asyncio
+async def test_inserat_parse_failure_detail_omits_exception_text():
+    from scrapers.inserat import get_inserate_details
+
+    class _BrokenPage:
+        url = "https://www.kleinanzeigen.de/s-anzeige/secret-listing"
+
+        async def goto(self, *_args, **_kwargs):
+            raise RuntimeError("playwright crashed at /tmp/secret-inserat-path")
+
+    with pytest.raises(HTTPException) as caught:
+        await get_inserate_details(
+            "https://www.kleinanzeigen.de/s-anzeige/secret-listing",
+            _BrokenPage(),
+        )
+    assert caught.value.status_code == 500
+    assert caught.value.detail == "Failed to fetch listing details"
+    assert "secret-inserat-path" not in str(caught.value.detail)
+    assert "playwright" not in str(caught.value.detail).lower()
+
+
+@pytest.mark.asyncio
+async def test_inserat_retry_fallback_detail_omits_structured_message():
+    from scrapers.inserat import get_inserate_details_optimized
+
+    browser_manager = MagicMock()
+    browser_manager.get_performance_metrics.side_effect = RuntimeError(
+        "metrics blew up with /tmp/secret-metrics-path"
+    )
+
+    async def boom(coro):
+        coro.close()
+        raise RuntimeError("playwright crashed at /tmp/secret-retry-path")
+
+    browser_manager.execute_with_semaphore = AsyncMock(side_effect=boom)
+    with pytest.raises(HTTPException) as caught:
+        await get_inserate_details_optimized(
+            browser_manager, "2674165671", retry_count=0
+        )
+    assert caught.value.status_code == 500
+    detail = caught.value.detail
+    text = detail if isinstance(detail, str) else str(detail)
+    assert "Failed to fetch listing details" in text
+    assert "secret-retry-path" not in text
+    assert "secret-metrics-path" not in text
+    assert "playwright" not in text.lower()

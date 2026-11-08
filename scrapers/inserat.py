@@ -116,7 +116,10 @@ async def get_inserate_details(url: str, page):
         }
     except Exception as e:
         print(f"[ERROR] {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Keep exception text in server logs only. Clients get a stable message.
+        raise HTTPException(
+            status_code=500, detail="Failed to fetch listing details"
+        ) from e
 
 
 async def get_inserate_details_optimized(
@@ -342,30 +345,29 @@ async def get_inserate_details_optimized(
                     return response
 
                 except Exception as e:
-                    # Fallback response if metrics collection also fails
+                    # Fallback response if metrics collection also fails.
+                    # structured_error.message can include scrape URLs and
+                    # Playwright paths; keep those in logs only.
+                    print(
+                        f"[ERROR] metrics fallback after detail fetch: "
+                        f"{structured_error.message}"
+                    )
                     raise HTTPException(
                         status_code=500,
-                        detail={
-                            "error": structured_error.message,
-                            "category": structured_error.category.value,
-                            "severity": structured_error.severity.value,
-                            "recovery_suggestions": structured_error.recovery_suggestions,
-                        },
+                        detail="Failed to fetch listing details",
                     ) from e
 
         # This should never be reached, but just in case
         if last_structured_error:
-            error_msg = f"Final error: {last_structured_error.message}"
+            print(
+                f"[ERROR] detail retry loop exhausted: "
+                f"{last_structured_error.message}"
+            )
             raise HTTPException(
                 status_code=500,
-                detail={
-                    "error": error_msg,
-                    "category": last_structured_error.category.value,
-                    "severity": last_structured_error.severity.value,
-                    "recovery_suggestions": last_structured_error.recovery_suggestions,
-                },
+                detail="Failed to fetch listing details",
             )
         else:
             raise HTTPException(
-                status_code=500, detail="Unexpected error in retry loop"
+                status_code=500, detail="Failed to fetch listing details"
             )
