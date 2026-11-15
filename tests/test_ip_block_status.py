@@ -65,5 +65,55 @@ def test_empty_results_page_stays_a_successful_search():
         response = await scraper.ultra_optimized_scrape(query="fahrrad", page_count=1)
         assert response["success"] is True
         assert response["results"] == []
+        assert "error" not in response
+
+    asyncio.run(_run())
+
+
+def test_failed_page_reports_a_reason_without_the_scrape_url():
+    secret = "https://www.kleinanzeigen.de/s-secret-query/k0"
+
+    async def _run():
+        scraper = _scraper()
+
+        async def _fail(url, page_num, retry_count=2):
+            now = time.time()
+            metrics = PageMetrics(
+                page_number=page_num,
+                url=url,
+                start_time=now,
+                end_time=now + 30,
+                success=False,
+                retry_count=retry_count,
+                error_message=f"page {page_num} hydration timeout: {secret}",
+                results_count=0,
+            )
+            return [], metrics
+
+        scraper.ultra_optimized_fetch_page = _fail
+        response = await scraper.ultra_optimized_scrape(query="laptop", page_count=1)
+        assert response["success"] is False
+        assert response["results"] == []
+        assert response["error"] == "page 1 hydration timeout"
+        assert secret not in response["error"]
+        assert "http" not in response["error"]
+
+    asyncio.run(_run())
+
+
+def test_page_exception_is_not_an_empty_success():
+    async def _run():
+        scraper = _scraper()
+
+        async def _boom(url, page_num, retry_count=2):
+            raise RuntimeError(f"timeout at {url}")
+
+        scraper.ultra_optimized_fetch_page = _boom
+        response = await scraper.ultra_optimized_scrape(query="laptop", page_count=1)
+        assert response["success"] is False
+        assert response["results"] == []
+        assert response["error"] == "search page failed"
+        assert "http" not in response["error"]
+        assert "timeout at" not in response["error"]
 
     asyncio.run(_run())
