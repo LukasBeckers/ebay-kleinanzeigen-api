@@ -54,6 +54,29 @@ class IpBlockedError(Exception):
     """Kleinanzeigen returned HTTP 403 or the IP-range ban HTML."""
 
 
+def client_search_failure(page_metrics: List[PageMetrics]) -> str:
+    """Reason for a search where every page failed.
+
+    ``PageMetrics.error_message`` keeps the scrape URL for server logs.
+    The JSON ``error`` must not. A missing ``error`` made the proxy report
+    the generic ``upstream search failed``.
+    """
+    parts: List[str] = []
+    for metric in page_metrics:
+        if metric.success:
+            continue
+        raw = (metric.error_message or "").lower()
+        if "hydration timeout" in raw or "page not ready" in raw:
+            parts.append(f"page {metric.page_number} hydration timeout")
+        elif "ip block" in raw:
+            parts.append(f"page {metric.page_number} Kleinanzeigen IP block")
+        else:
+            parts.append(f"page {metric.page_number} fetch failed")
+    if not parts:
+        return "search page failed"
+    return "; ".join(parts[:5])
+
+
 class UltraOptimizedScraper:
     """
     Ultra-optimized scraper implementing all advanced asyncio patterns.
@@ -144,7 +167,7 @@ class UltraOptimizedScraper:
 
         with error_handling_context(
             operation="ultra_fetch_page", page_number=page_num, url=url, logger=logger
-        ):
+        ) as page_ctx:
             start_time = time.time()
             last_error = None
 
@@ -249,8 +272,21 @@ class UltraOptimizedScraper:
 
                     break
 
-            # Create failed metrics
+            # Create failed metrics. The context manager only counts an
+            # exception that escapes this block, so record the failure here.
+            # Otherwise the summary says the page succeeded.
             error_msg = str(last_error) if last_error else "Unknown error"
+            recorded = last_error or RuntimeError("page fetch failed")
+            page_ctx.errors.append(
+                ErrorClassifier.classify_exception(
+                    recorded, page_ctx.context, "page_fetch"
+                )
+            )
+            logger.logger.warning(
+                "page %s failed after retries (%s)",
+                page_num,
+                type(recorded).__name__,
+            )
             metrics = PageMetrics(
                 page_number=page_num,
                 url=url,
@@ -429,6 +465,17 @@ class UltraOptimizedScraper:
             if warnings:
                 response["warnings"] = warning_manager.get_user_friendly_messages()
                 response["warning_summary"] = warning_manager.get_warning_summary()
+
+            # Every page failed. success is already false. Without error, the
+            # proxy fills in "upstream search failed" and the scrape URL in
+            # the page metric never reaches Listing Hunter.
+            if successful_pages == 0 and page_count > 0:
+                response["error"] = client_search_failure(
+                    [metric for metric in all_metrics if not metric.success]
+                )
+                logger.logger.warning(
+                    "search returned no pages: %s", response["error"]
+                )
 
             return response
 

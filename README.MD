@@ -134,6 +134,12 @@ with `success: true` and `results: []`. The ready check does not use
 `#srchrslt-results`: that node is in the shell HTML before cards hydrate.
 Extraction stays scoped to `#srchrslt-adtable`.
 
+A page that never becomes ready, or any other fetch that fails every page,
+is not an empty result. `/inserate` still returns **HTTP 200** with
+`success: false` and an `error` such as `page 1 hydration timeout`. That
+string does not include the scrape URL. A body with `success: false` and no
+`error` used to be reported as `upstream search failed`.
+
 Keyword searches with no category must use the all-categories suffix `/k0`,
 the same path shape as a category search:
 
