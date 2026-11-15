@@ -62,6 +62,25 @@ async def test_inserate_response_omits_browser_metrics():
 
 
 @pytest.mark.asyncio
+async def test_extract_ads_failure_detail_omits_exception_text():
+    scraper = UltraOptimizedScraper(MagicMock(max_concurrent=1))
+    page = MagicMock()
+    page.query_selector_all = AsyncMock(
+        side_effect=RuntimeError(
+            "playwright crashed at /tmp/secret-search-path "
+            "https://www.kleinanzeigen.de/s-secret-query/k0"
+        )
+    )
+    with pytest.raises(HTTPException) as caught:
+        await scraper.extract_ads_optimized(page)
+    assert caught.value.status_code == 500
+    assert caught.value.detail == "Failed to fetch listings"
+    assert "secret-search-path" not in str(caught.value.detail)
+    assert "secret-query" not in str(caught.value.detail)
+    assert "playwright" not in str(caught.value.detail).lower()
+
+
+@pytest.mark.asyncio
 async def test_ip_block_client_detail_omits_scrape_url():
     browser_manager = MagicMock()
     browser_manager.max_concurrent = 1

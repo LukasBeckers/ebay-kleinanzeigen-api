@@ -104,8 +104,9 @@ also carries `X-Recycle-Every`, `X-Requests-Since-Recycle`, and
 Search JSON (`GET /inserate`) does **not** include `browser_metrics`; those
 pool and recycle counters stay off the public scrape body. IP-block responses
 use the fixed detail `upstream blocked`, seller failures use
-`Failed to fetch seller`, and listing-detail failures use
-`Failed to fetch listing details`, so scrape URLs and exception text stay in
+`Failed to fetch seller`, listing-detail failures use
+`Failed to fetch listing details`, and search-card extraction failures use
+`Failed to fetch listings`, so scrape URLs and exception text stay in
 server logs.
 
 Change the interval at runtime (does not rewrite env; restart reloads

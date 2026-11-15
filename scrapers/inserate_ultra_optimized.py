@@ -112,8 +112,10 @@ class UltraOptimizedScraper:
 
             return results
 
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail="Failed to fetch listings"
+            ) from exc
 
     async def _extract_single_ad(self, article) -> Dict[str, Any] | None:
         """Extract one listing card (legacy or modern layout)."""
