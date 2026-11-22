@@ -45,6 +45,29 @@ class TestIsIpBlockPage:
         html = '<ul id="srchrslt-adtable"><article data-adid="1"></article></ul>'
         assert is_ip_block_page(html, 200) is False
 
+    def test_listing_gesperrt_on_a_200_results_page_is_not_block(self):
+        """A results page is not an IP ban just because an ad says gesperrt.
+
+        Category pages (garage ads say "abgesperrt"; other ads say "Konto
+        gesperrt") are HTTP 200 with real cards. Every Kleinanzeigen document
+        also contains the letters "ip" in scripts and URLs. The 2026-11-22
+        logs classified that pair as "Kleinanzeigen IP block (http 200)" on
+        every run of one search while other searches in the same minute
+        extracted listings.
+        """
+        html = """
+        <html>
+          <head><script>var endpoint = "https://example.test/ip-check";</script></head>
+          <body>
+            <ul id="srchrslt-adtable">
+              <article data-adid="1"><h2>Garage abgesperrt</h2></article>
+              <article data-adid="2"><p>Konto gesperrt</p></article>
+            </ul>
+          </body>
+        </html>
+        """
+        assert is_ip_block_page(html, 200) is False
+
 
 MODERN_EMPTY_HTML = """
 <body id="srchrslt">

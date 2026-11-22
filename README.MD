@@ -127,6 +127,10 @@ A Kleinanzeigen **HTTP 403** or the “IP-Bereich gesperrt” page is a **hard
 failure**: `/inserate` returns **403**, not 200 with an empty list. The page
 batch re-raises that 403 instead of dropping the page and answering
 `success: false`. The proxy load balancer records that as a failed attempt.
+A normal HTTP 200 results page is not a block when an ad says “gesperrt” or
+“abgesperrt”. Those pages also contain the letters “ip” in scripts and URLs;
+only the ban-page phrases (`ip-bereich`, `vorübergehend gesperrt`,
+`ip-eingeschraenkt`) count, plus a real HTTP 403.
 
 A search that loaded `#srchrslt-adtable` but has **no cards**, or the modern
 zero-result page `#saved-search-empty-result`, still returns **HTTP 200**
