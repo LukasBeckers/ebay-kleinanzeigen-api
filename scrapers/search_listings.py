@@ -23,12 +23,15 @@ _IP_BLOCK_MARKERS = (
 
 
 def is_ip_block_page(html: str, status: int | None = None) -> bool:
-    """True when Kleinanzeigen refused the request (HTTP 403 or ban HTML)."""
+    """True when Kleinanzeigen refused the request (HTTP 403 or ban HTML).
+
+    Listing copy such as "Konto gesperrt" or "abgesperrt" is not a ban.
+    Result documents also contain the letters "ip" in scripts and URLs, so
+    those two substrings together must not count.
+    """
     if status == 403:
         return True
     text = (html or "").lower()
-    if "gesperrt" in text and "ip" in text:
-        return True
     return any(marker in text for marker in _IP_BLOCK_MARKERS)
 
 SPONSORED_LI_CLASS_TOKENS = (
